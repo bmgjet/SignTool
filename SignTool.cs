@@ -27,7 +27,7 @@ namespace Oxide.Plugins
         //List Of Server Signs Found
         List<Signage> ServerSigns = new List<Signage>();
         //IDs of types of signs
-        uint[] signids = { 708840119, 2628005754, 3591916872, 3919686896, 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128 };
+        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
         //Admin Permission
         const string PermMap = "SignTool.admin";
         //Sign Data Extracted from MapData
