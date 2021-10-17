@@ -16,7 +16,7 @@ using Color = System.Drawing.Color;
 
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.1")]
+    [Info("SignTool", "bmgjet", "1.0.2")]
     [Description("SignTool, Insert Images and Skins into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
@@ -48,10 +48,30 @@ namespace Oxide.Plugins
         //IDs of types of signs
         uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
         //IDs of prefabs that are skinnable
-        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780 };
+        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296 };
+
+        //Paintable Signs
+        /*
+        sign.small.wood.prefab
+        sign.post.town.roof.prefab
+        sign.post.town.prefab
+        sign.post.single.prefab
+        sign.post.double.prefab
+        sign.pole.banner.large.prefab
+        sign.pictureframe.landscape.prefab
+        sign.pictureframe.portrait.prefab
+        sign.pictureframe.tall.prefab
+        sign.pictureframe.xxl.prefab
+        sign.pictureframe.xl.prefab
+        sign.hanging.banner.large.prefab
+        sign.hanging.ornate.prefab
+        spinner.wheel.deployed.prefab
+        sign.medium.wood.prefab
+        sign.large.wood.prefab
+        sign.huge.wood.prefab
+        sign.hanging.prefab
 
         //Skinnable Items
-        /*
         fridge.deployed.prefab
         locker.deployed.prefab
         reactivetarget_deployed.prefab
@@ -70,7 +90,11 @@ namespace Oxide.Plugins
         door.double.hinged.toptier.prefab
         door.double.hinged.metal.prefab
         table.deployed.prefab
+        barricade.concrete.prefab
+        barricade.sandbags.prefab
+        waterpurifier.deployed.prefab
         */
+
 
         //Admin Permission
         const string PermMap = "SignTool.admin";
@@ -233,9 +257,8 @@ namespace Oxide.Plugins
         }
         void OnServerInitialized()
         {
-
             //Delay to give time for everything to fully spawn in.
-            timer.Once(5f, () =>
+            timer.Once(10f, () =>
             {
 
                 //Extract Map Data
@@ -617,46 +640,46 @@ namespace Oxide.Plugins
                 }
                 www.Dispose();
             }
-                SignSize size = GetImageSizeFor(request.Sign);
+            SignSize size = GetImageSizeFor(request.Sign);
 
-                // Verify that we have image size data for the targeted sign.
+            // Verify that we have image size data for the targeted sign.
 
-                RotateFlipType rotation = RotateFlipType.RotateNoneFlipNone;
-                if (request.Hor)
-                {
-                    rotation = RotateFlipType.RotateNoneFlipX;
-                }
+            RotateFlipType rotation = RotateFlipType.RotateNoneFlipNone;
+            if (request.Hor)
+            {
+                rotation = RotateFlipType.RotateNoneFlipX;
+            }
 
-                object rotateObj = Interface.Call("GetImageRotation", request.Sign.Entity);
-                if (rotateObj is RotateFlipType)
-                {
-                    rotation = (RotateFlipType)rotateObj;
-                }
+            object rotateObj = Interface.Call("GetImageRotation", request.Sign.Entity);
+            if (rotateObj is RotateFlipType)
+            {
+                rotation = (RotateFlipType)rotateObj;
+            }
 
-                // Get the bytes array for the resized image for the targeted sign.
-                byte[] resizedImageBytes = ResizeImage(imageBytes,size.Width, size.Height, size.ImageWidth, size.ImageHeight, false && !request.Raw, rotation);
+            // Get the bytes array for the resized image for the targeted sign.
+            byte[] resizedImageBytes = ResizeImage(imageBytes, size.Width, size.Height, size.ImageWidth, size.ImageHeight, false && !request.Raw, rotation);
 
-                // Check if the sign already has a texture assigned to it.
-                if (request.Sign.TextureId() > 0)
-                {
-                    // A texture was already assigned, remove this file to make room for the new one.
-                    FileStorage.server.Remove(request.Sign.TextureId(), FileStorage.Type.png, request.Sign.NetId);
-                }
+            // Check if the sign already has a texture assigned to it.
+            if (request.Sign.TextureId() > 0)
+            {
+                // A texture was already assigned, remove this file to make room for the new one.
+                FileStorage.server.Remove(request.Sign.TextureId(), FileStorage.Type.png, request.Sign.NetId);
+            }
 
-                // Create the image on the filestorage and send out a network update for the sign.
-                request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, request.Sign.NetId), 0);
-                request.Sign.SendNetworkUpdate();
+            // Create the image on the filestorage and send out a network update for the sign.
+            request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, request.Sign.NetId), 0);
+            request.Sign.SendNetworkUpdate();
 
-                // Notify the player that the image was loaded.
-                request.Sender.ChatMessage("Sign Updated");
+            // Notify the player that the image was loaded.
+            request.Sender.ChatMessage("Sign Updated");
 
-                // Call the Oxide hook 'OnSignUpdated' to notify other plugins of the update event.
-                Interface.Oxide.CallHook("OnSignUpdated", request.Sign, request.Sender);
+            // Call the Oxide hook 'OnSignUpdated' to notify other plugins of the update event.
+            Interface.Oxide.CallHook("OnSignUpdated", request.Sign, request.Sender);
 
-                // Attempt to start the next download.
-                StartNextDownload(true);           
+            // Attempt to start the next download.
+            StartNextDownload(true);
         }
-       
+
 
         private byte[] GetImageBytes(UnityWebRequest www)
         {
@@ -789,5 +812,5 @@ namespace Oxide.Plugins
             World.Serialization.Save(mapname);
             player.ChatMessage("Saved edited map in root dir as " + mapname);
         }
-    }    
+    }
 }
