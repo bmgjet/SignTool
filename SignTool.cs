@@ -15,11 +15,10 @@ using UnityEngine.Networking;
 using Color = System.Drawing.Color;
 using Oxide.Core.Plugins;
 
-
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.3")]
-    [Description("SignTool, Insert Images and Skins into map file directly, Then reload them on server startup.")]
+    [Info("SignTool", "bmgjet", "1.0.4")]
+    [Description("SignTool, Insert Images, Skins,Scale into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
     //<SerializedImageData>
@@ -44,8 +43,9 @@ namespace Oxide.Plugins
     public class SignTool : RustPlugin
     {
         //Debug Output
-        bool showDebug = false;
-
+        bool showDebug = true;
+        //Temp List Of Things Scales Applied Too.
+        List<BaseEntity> ScaledEntitys = new List<BaseEntity>();
         //List Of Server Signs Found
         Dictionary<Signage,Vector3> ServerSigns = new Dictionary<Signage, Vector3>();
         //List Of Server Skinnable prefabs Found
@@ -55,8 +55,8 @@ namespace Oxide.Plugins
         //IDs of prefabs that are skinnable
         uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296 };
 
-        //Paintable Signs
         /*
+        //Paintable Signs
         sign.small.wood.prefab
         sign.post.town.roof.prefab
         sign.post.town.prefab
@@ -99,7 +99,6 @@ namespace Oxide.Plugins
         barricade.sandbags.prefab
         waterpurifier.deployed.prefab
         */
-
 
         //Admin Permission
         const string PermMap = "SignTool.admin";
@@ -145,12 +144,14 @@ namespace Oxide.Plugins
             uint NetId { get; }
             void SendNetworkUpdate();
         }
+
         public interface IPaintableEntity : IBasePaintableEntity
         {
             void SetImage(uint id, int frameid);
             bool CanUpdate(BasePlayer player);
             uint TextureId();
         }
+
         public class BasePaintableEntity : IBasePaintableEntity
         {
             public BaseEntity Entity { get; }
@@ -171,6 +172,7 @@ namespace Oxide.Plugins
                 Entity.SendNetworkUpdate();
             }
         }
+
         private class PaintableSignage : BasePaintableEntity, IPaintableEntity
         {
             public Signage Sign { get; set; }
@@ -195,6 +197,7 @@ namespace Oxide.Plugins
                 return Sign.textureIDs.First();
             }
         }
+
         private class PaintableFrame : BasePaintableEntity, IPaintableEntity
         {
             public PhotoFrame Sign { get; set; }
@@ -234,11 +237,13 @@ namespace Oxide.Plugins
                 ImageHeight = height;
             }
         }
+
         private void Init()
         {
             //Setup Permission
             permission.RegisterPermission(PermMap, this);
         }
+
         bool isSign(PrefabData sign)
         {
             //Checks prefab has a valid sign id
@@ -250,11 +255,13 @@ namespace Oxide.Plugins
             //Checks prefab has a valid skinnable id
             return (skinnableids.Contains(skinid.id));
         }
+
         public string Base64Encode(string plainText)
         {
             var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
             return System.Convert.ToBase64String(plainTextBytes);
         }
+
         public string Base64Decode(string base64EncodedData)
         {
             var base64EncodedBytes = System.Convert.FromBase64String(base64EncodedData);
@@ -264,9 +271,84 @@ namespace Oxide.Plugins
         [PluginReference]
         Plugin EntityScaleManager;
 
+        public void Rescale()
+        {
+            if (EntityScaleManager == null)
+            {
+                Puts(@"Scaling Disabled get plugin https://umod.org/plugins/entity-scale-manager");
+                return;
+            }
+            int Scaled = 0;
+            if (ServerSigns.Count != 0)
+            {
+                //Apply Scale Data to Found Signs
+                foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
+                {
+                    if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
+                    foreach (KeyValuePair<Vector3, byte[]> sd in SignData)
+                    {
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        {
+                            //Scale
+                            RemoveSphere(ss.Key);
+                            if (doScale(ss.Key as BaseEntity, ss.Value.z))
+                            {
+                                ScaledEntitys.Add(ss.Key as BaseEntity);
+                                Scaled++;
+                                if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
+                            }
+                        }
+                    }
+                }
+            }
+            if (ServerSkinnables.Count != 0)
+            {
+                //Apply Scale Data to Found Skinnables
+                foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
+                {
+                    if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
+                    foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                    {
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        {
+                            //Scale
+                            RemoveSphere(ss.Key);
+
+                            if (doScale(ss.Key, ss.Value.z))
+                            {
+                                ScaledEntitys.Add(ss.Key as BaseEntity);
+                                Scaled++;
+                                if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
+                            }
+
+                        }
+                    }
+                }
+            }
+            Puts("Scaled " + Scaled.ToString() + " Entitys");
+        }
+
+        private void Unload()
+        {
+            foreach(BaseEntity be in ScaledEntitys)
+            {
+                RemoveSphere(be);
+            }
+        }
+
+        private void RemoveSphere(BaseEntity be)
+        {
+            var sphereEntity = be.GetParentEntity() as SphereEntity;
+            if (sphereEntity == null)
+            {
+                return;
+            }
+            be.transform.localScale /= sphereEntity.currentRadius;
+            be.SetParent(sphereEntity.GetParentEntity(), worldPositionStays: true, sendImmediate: true);
+            sphereEntity.Kill();
+        }
         void OnServerInitialized()
         {
-
             //Extract Map Data
             for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
             {
@@ -322,11 +404,6 @@ namespace Oxide.Plugins
                             ApplySignage(ss.Key, sd.Value, 0);
                             ss.Key.SetFlag(BaseEntity.Flags.Locked, true);
                             ss.Key.SendNetworkUpdate();
-                            //Scale
-                            if (doScale(ss.Key as BaseEntity, ss.Value.x))
-                            {
-                                if (showDebug) Puts("Scaled to " + ss.Value.x.ToString());
-                            }
                         }
                     }
                 }
@@ -343,35 +420,24 @@ namespace Oxide.Plugins
                         {
                             if (showDebug) Puts("Applying skin");
                             ApplySkin(ss.Key, sd.Value);
-                            //Scale
-                            if (doScale(ss.Key, ss.Value.x))
-                            {
-                                if (showDebug) Puts("Scaled to " + ss.Value.x.ToString());
-                            }
                         }
                     }
                 }
             }
-            if (EntityScaleManager == null)
-            {
-                Puts(@"Scaling Disabled get plugin https://umod.org/plugins/entity-scale-manager");
-            }
+            Rescale();
         }
 
-        bool doScale(BaseEntity be, float radius)
+        public bool doScale(BaseEntity be, float radius)
         {
             //Scale
             if (EntityScaleManager != null)
             {
+                //Dead zone for rounding
                 if (radius > 1.1f || radius < 0.9f)
                 {
-                    var scaled = EntityScaleManager.Call("API_GetScale", be);
-                    //Already Scaled
-                    if (float.Parse(scaled.ToString()) == 1f)
-                    {
-                        EntityScaleManager.Call("API_ScaleEntity", be, radius);
-                        return true;
-                    }
+                    //Sends Command to EntityScaleManager
+                    EntityScaleManager.Call("API_ScaleEntity", be, radius);
+                    return true;
                 }
             }
             return false;
@@ -392,7 +458,7 @@ namespace Oxide.Plugins
         }
         List<BaseEntity> FindSkin(Vector3 pos, float radius)
         {
-            //Casts a sphere at given position and find all signs there
+            //Casts a sphere at given position and find all Skins there
             var hits = Physics.SphereCastAll(pos, radius, Vector3.up);
             var x = new List<BaseEntity>();
             foreach (var hit in hits)
@@ -403,10 +469,10 @@ namespace Oxide.Plugins
             }
             return x;
         }
+
         //(Thanks to SignArtists code)
         void ApplySignage(Signage sign, byte[] imageBytes, int index)
         {
-            //Apply Image to sign
             if (!_signSizes.ContainsKey(sign.ShortPrefabName))
                 return;
 
@@ -417,7 +483,7 @@ namespace Oxide.Plugins
             }
             var resizedImage = ImageResize(imageBytes, _signSizes[sign.ShortPrefabName].Width,
                 _signSizes[sign.ShortPrefabName].Height);
-
+            //Applys Image
             sign.textureIDs[index] = FileStorage.server.Store(resizedImage, FileStorage.Type.png, sign.net.ID);
         }
 
@@ -428,6 +494,7 @@ namespace Oxide.Plugins
             item.SendNetworkUpdate();
 
         }
+
         //(Thanks to SignArtists code)
         byte[] ImageResize(byte[] imageBytes, int width, int height)
         {
@@ -458,6 +525,7 @@ namespace Oxide.Plugins
                 SignData.Add(pos, ImageData);
             }
         }
+
         void XMLDecodeSkin(string SerialData)
         {
             string[] DataParse = SerialData.Split(new string[] { "<position>" }, StringSplitOptions.None);
@@ -472,6 +540,7 @@ namespace Oxide.Plugins
                 SkinData.Add(pos, skinid);
             }
         }
+
         //Create XML Data
         string XMLEncode()
         {
@@ -503,6 +572,7 @@ namespace Oxide.Plugins
             XMLData = XMLData + SerialData + "</SerializedImageData>";
             return XMLData;
         }
+
         string XMLEncodeSkin()
         {
             string XMLData = @"<? xml version=""1.0""?><SerializedSkinData>";
@@ -522,11 +592,11 @@ namespace Oxide.Plugins
                                    "</skin>");
                 }
             }
-
             XMLData = XMLData + SerialData + "</SerializedSkinData>";
             return XMLData;
         }
 
+        //Finds Signs
         private bool IsLookingAtSign(BasePlayer player, out IPaintableEntity sign)
         {
             RaycastHit hit;
@@ -543,100 +613,10 @@ namespace Oxide.Plugins
                     sign = new PaintableFrame(entity as PhotoFrame);
                 }
             }
-
-            // Return true or false depending on if we found a sign.
             return sign != null;
         }
 
-        //Skins Items that are being looked at.
-        [ChatCommand("sskin")]
-        private void SkinCommand(BasePlayer basePlayer, string command, string[] args)
-        {
-            if (basePlayer == null)
-            {
-                return;
-            }
-            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
-            {
-                //Dont have Permission to use so exit.
-                return;
-            }
-            ulong skin;
-            if (args.Length != 1 || !ulong.TryParse(args[0], out skin))
-            {
-                basePlayer.ChatMessage("Invalid Skin ID");
-                return;
-            }
-
-            RaycastHit hit;
-            if (!Physics.Raycast(basePlayer.eyes.HeadRay(), out hit))
-            {
-                basePlayer.ChatMessage("No Skinnable Entitys Found. Try Looking at the Hinge area if its a door.");
-                return;
-            }
-
-            var entity = hit.GetEntity();
-            if (entity == null)
-            {
-                basePlayer.ChatMessage("No Skinnable Entitys Found. Try Looking at the Hinge area if its a door.");
-                return;
-            }
-
-            entity.skinID = skin;
-            entity.SendNetworkUpdateImmediate();
-            basePlayer.ChatMessage("Applying Skin");
-        }
-
-        //Scale Items that are being looked at.
-        [ChatCommand("sscale")]
-        private void ScaleCommand(BasePlayer basePlayer, string command, string[] args)
-        {
-            if (basePlayer == null)
-            {
-                return;
-            }
-            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
-            {
-                //Dont have Permission to use so exit.
-                return;
-            }
-            if (EntityScaleManager == null)
-            {
-                Puts(@"Scaling Disabled get plugin https://umod.org/plugins/entity-scale-manager");
-                return;
-            }
-            float scale;
-            if (args.Length != 1 || !float.TryParse(args[0], out scale))
-            {
-                basePlayer.ChatMessage("Invalid Scale");
-                return;
-            }
-
-            RaycastHit hit;
-            if (!Physics.Raycast(basePlayer.eyes.HeadRay(), out hit))
-            {
-                basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
-                return;
-            }
-
-            var entity = hit.GetEntity();
-            if (entity == null)
-            {
-                basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
-                return;
-            }
-            EntityScaleManager.Call("API_ScaleEntity", entity, scale);
-
-            //Find in prefab list and update its scale
-            for(int i = 0; i < World.Serialization.world.prefabs.Count;i++)
-            {
-                if(entity.transform.position == World.Serialization.world.prefabs[i].position)
-                {
-                    World.Serialization.world.prefabs[i].scale = new Vector3(scale, scale, scale);
-                    basePlayer.ChatMessage("Updated in Map Prefab Data");
-                }
-            }
-        }
+        //Image Downloading Thanks SignArtist
         private class DownloadRequest
         {
             public BasePlayer Sender { get; }
@@ -653,35 +633,7 @@ namespace Oxide.Plugins
                 Raw = raw;
                 Hor = hor;
             }
-        }
-
-        [ChatCommand("ssign")]
-        void signcommand(BasePlayer basePlayer, string command, string[] args)
-        {
-            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
-            {
-                //Dont have Permission to use so exit.
-                return;
-            }
-            if (args.Length < 1)
-            {
-                basePlayer.ChatMessage("Invalid Args");
-                return;
-            }
-            IPaintableEntity sign;
-            if (!IsLookingAtSign(basePlayer, out sign))
-            {
-                basePlayer.ChatMessage("No Signs Found");
-                return;
-            }
-            // This sign pastes in reverse, so we'll check and set a var to flip it
-            bool hor = sign.ShortPrefabName == "sign.hanging";
-            downloadQueue.Enqueue(new DownloadRequest(args[0], basePlayer, sign, false, hor));
-
-            // Attempt to start the next download.
-            StartNextDownload();
-            Interface.Oxide.CallHook("OnImagePost", basePlayer, args[0]);
-        }
+        }       
 
         private void StartNextDownload(bool reduceCount = false)
         {
@@ -693,12 +645,12 @@ namespace Oxide.Plugins
             {
                 return _signSizes[signage.ShortPrefabName];
             }
-
             return null;
         }
         private IEnumerator DownloadImage(DownloadRequest request)
         {
             byte[] imageBytes;
+            //Path for Base64 weblinks
             if (request.Url.StartsWith("data:image"))
             {
                 imageBytes = LoadImage(request.Url);
@@ -708,10 +660,6 @@ namespace Oxide.Plugins
                 UnityWebRequest www = UnityWebRequest.Get(request.Url);
 
                 yield return www.SendWebRequest();
-
-                // Verify that there is a valid reference to the plugin from this class.
-
-                // Verify that the webrequest was succesful.
                 if (www.isNetworkError || www.isHttpError)
                 {
                     // The webrequest wasn't succesful, show a message to the player and attempt to start the next download.
@@ -735,7 +683,6 @@ namespace Oxide.Plugins
             SignSize size = GetImageSizeFor(request.Sign);
 
             // Verify that we have image size data for the targeted sign.
-
             RotateFlipType rotation = RotateFlipType.RotateNoneFlipNone;
             if (request.Hor)
             {
@@ -772,7 +719,6 @@ namespace Oxide.Plugins
             StartNextDownload(true);
         }
 
-
         private byte[] GetImageBytes(UnityWebRequest www)
         {
             Texture2D texture = new Texture2D(2, 2);
@@ -790,8 +736,10 @@ namespace Oxide.Plugins
             }
             return image;
         }
+
         private byte[] LoadImage(string data)
         {
+            //Convert Base64 link image to data.
             data = data.Replace("data:image/gif;base64,", "");
             data = data.Replace("data:image/jpeg;base64,", "");
             data = data.Replace("data:image/png;base64,", "");
@@ -864,8 +812,158 @@ namespace Oxide.Plugins
             image.SetPixel(image.Width - 1, image.Height - 1, pixel);
         }
 
-        //Inserts Data from signs placed in the map into MapData
-        [ChatCommand("MapSave")]
+        //Chat Commands
+        //
+
+        //Prints Image Onto Sign being looked at.
+        [ChatCommand("ssign")]
+        void signcommand(BasePlayer basePlayer, string command, string[] args)
+        {
+            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
+            {
+                //Dont have Permission to use so exit.
+                return;
+            }
+            if (args.Length < 1)
+            {
+                basePlayer.ChatMessage("Invalid Args");
+                return;
+            }
+            IPaintableEntity sign;
+            if (!IsLookingAtSign(basePlayer, out sign))
+            {
+                basePlayer.ChatMessage("No Signs Found");
+                return;
+            }
+            // This sign pastes in reverse, so we'll check and set a var to flip it
+            bool hor = sign.ShortPrefabName == "sign.hanging";
+            downloadQueue.Enqueue(new DownloadRequest(args[0], basePlayer, sign, false, hor));
+
+            // Attempt to start the next download.
+            StartNextDownload();
+            Interface.Oxide.CallHook("OnImagePost", basePlayer, args[0]);
+        }
+
+        //Skins Items that are being looked at.
+        [ChatCommand("sskin")]
+        private void SkinCommand(BasePlayer basePlayer, string command, string[] args)
+        {
+            if (basePlayer == null)
+            {
+                return;
+            }
+            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
+            {
+                //Dont have Permission to use so exit.
+                return;
+            }
+            ulong skin;
+            if (args.Length != 1 || !ulong.TryParse(args[0], out skin))
+            {
+                basePlayer.ChatMessage("Invalid Skin ID");
+                return;
+            }
+
+            RaycastHit hit;
+            if (!Physics.Raycast(basePlayer.eyes.HeadRay(), out hit))
+            {
+                basePlayer.ChatMessage("No Skinnable Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+
+            var entity = hit.GetEntity();
+            if (entity == null)
+            {
+                basePlayer.ChatMessage("No Skinnable Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+            //Sets Skin
+            entity.skinID = skin;
+            entity.SendNetworkUpdateImmediate();
+            basePlayer.ChatMessage("Applying Skin");
+        }
+
+        //Scale Items that are being looked at.
+        [ChatCommand("sscale")]
+        private void ScaleCommand(BasePlayer basePlayer, string command, string[] args)
+        {
+            if (basePlayer == null)
+            {
+                return;
+            }
+            if (!permission.UserHasPermission(basePlayer.UserIDString, PermMap))
+            {
+                //Dont have Permission to use so exit.
+                return;
+            }
+            if (EntityScaleManager == null)
+            {
+                Puts(@"Scaling Disabled get plugin https://umod.org/plugins/entity-scale-manager");
+                return;
+            }
+            float scale;
+            if (args.Length != 1 || !float.TryParse(args[0], out scale))
+            {
+                basePlayer.ChatMessage("Invalid Scale");
+                return;
+            }
+
+            RaycastHit hit;
+            if (!Physics.Raycast(basePlayer.eyes.HeadRay(), out hit))
+            {
+                basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+
+            var entity = hit.GetEntity();
+            if (entity == null)
+            {
+                basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+            EntityScaleManager.Call("API_ScaleEntity", entity, scale);
+
+            //Find in prefab list and update its scale
+            for (int i = 0; i < World.Serialization.world.prefabs.Count; i++)
+            {
+                if (entity.transform.position == World.Serialization.world.prefabs[i].position)
+                {
+                    World.Serialization.world.prefabs[i].scale.z = scale;
+                    basePlayer.ChatMessage("Updated in Map Prefab Data");
+                }
+            }
+        }
+
+        //Resets to settings in mapdata
+        [ChatCommand("Reset")]
+        void Rescale(BasePlayer player, string command, string[] args)
+        {
+            //Remove signs and entitys defined in the MapData
+            foreach(KeyValuePair<Vector3,uint> skinned in SkinData)
+            {
+                try
+                {
+                    BaseEntity BaseEntity = FindSkin(skinned.Key, 1f)[0];
+                    BaseEntity.Kill();
+                }
+                catch { }
+            }
+            foreach (KeyValuePair<Vector3, byte[]> painted in SignData)
+            {
+                try
+                {
+                    BaseEntity BaseEntity = FindSkin(painted.Key, 0.65f)[0];
+                    BaseEntity.Kill();
+                }
+                catch { }
+            }
+
+            //Recreate them from Prefab List
+
+        }
+
+            //Save Map and Data to MapData
+            [ChatCommand("MapSave")]
         void MapSave(BasePlayer player, string command, string[] args)
         {
             if (!permission.UserHasPermission(player.UserIDString, PermMap))
@@ -901,6 +999,7 @@ namespace Oxide.Plugins
                 ssd.data = Encoding.ASCII.GetBytes(XMLDataSkin);
             }
             string mapname = World.MapFileName.ToString().Replace(".map", ".embeded.map");
+            //Create File
             World.Serialization.Save(mapname);
             player.ChatMessage("Saved edited map in root dir as " + mapname);
         }
