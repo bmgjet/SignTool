@@ -17,7 +17,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.4")]
+    [Info("SignTool", "bmgjet", "1.0.5")]
     [Description("SignTool, Insert Images, Skins,Scale into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
@@ -43,11 +43,12 @@ namespace Oxide.Plugins
     public class SignTool : RustPlugin
     {
         //Debug Output
-        bool showDebug = true;
+        bool showDebug = false;
         //Temp List Of Things Scales Applied Too.
         List<BaseEntity> ScaledEntitys = new List<BaseEntity>();
+        List<BaseEntity> Protected = new List<BaseEntity>();
         //List Of Server Signs Found
-        Dictionary<Signage,Vector3> ServerSigns = new Dictionary<Signage, Vector3>();
+        Dictionary<Signage, Vector3> ServerSigns = new Dictionary<Signage, Vector3>();
         //List Of Server Skinnable prefabs Found
         Dictionary<BaseEntity, Vector3> ServerSkinnables = new Dictionary<BaseEntity, Vector3>();
         //IDs of types of signs
@@ -268,6 +269,13 @@ namespace Oxide.Plugins
             return System.Text.Encoding.UTF8.GetString(base64EncodedBytes);
         }
 
+        object OnEntityKill(BaseNetworkable entity)
+        {
+            //Protects items from being destroyed.
+            if (Protected.Contains(entity)) return true;
+            return null;
+        }
+
         [PluginReference]
         Plugin EntityScaleManager;
 
@@ -330,7 +338,7 @@ namespace Oxide.Plugins
 
         private void Unload()
         {
-            foreach(BaseEntity be in ScaledEntitys)
+            foreach (BaseEntity be in ScaledEntitys)
             {
                 RemoveSphere(be);
             }
@@ -349,82 +357,99 @@ namespace Oxide.Plugins
         }
         void OnServerInitialized()
         {
-            //Extract Map Data
-            for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
+            Startup();
+        }
+
+        public void Startup()
+        {
+            //Delay slightly to give time for everything to be fully loaded on slow servers.
+            timer.Once(2f, () =>
             {
-                MapData mapdata = World.Serialization.world.maps[i];
-                if (mapdata.name == Base64Encode("SerializedImageData"))
+                //Extract Map Data
+                for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
                 {
-                    //Process ImageData
-                    XMLDecode(System.Text.Encoding.ASCII.GetString(mapdata.data));
-                    Puts("Processed SerializedImageData " + SignData.Count.ToString() + " Images Found");
-                }
-                else if (mapdata.name == Base64Encode("SerializedSkinData"))
-                {
-                    //Process SkinData
-                    XMLDecodeSkin(System.Text.Encoding.ASCII.GetString(mapdata.data));
-                    Puts("Processed SerializedSkinData " + SkinData.Count.ToString() + " Skins Found");
-                }
-            }
-            //Find All Server Signs
-            for (int i = World.Serialization.world.prefabs.Count - 1; i >= 0; i--)
-            {
-                PrefabData prefabdata = World.Serialization.world.prefabs[i];
-                if (isSign(prefabdata))
-                {
-                    foreach (Signage s in FindSign(prefabdata.position, 0.2f))
+                    MapData mapdata = World.Serialization.world.maps[i];
+                    if (mapdata.name == Base64Encode("SerializedImageData"))
                     {
-                        if (!ServerSigns.ContainsKey(s))
-                            ServerSigns.Add(s, prefabdata.scale);
+                        //Process ImageData
+                        XMLDecode(System.Text.Encoding.ASCII.GetString(mapdata.data));
+                        Puts("Processed SerializedImageData " + SignData.Count.ToString() + " Images Found");
+                    }
+                    else if (mapdata.name == Base64Encode("SerializedSkinData"))
+                    {
+                        //Process SkinData
+                        XMLDecodeSkin(System.Text.Encoding.ASCII.GetString(mapdata.data));
+                        Puts("Processed SerializedSkinData " + SkinData.Count.ToString() + " Skins Found");
                     }
                 }
-                if (isSkinnable(prefabdata))
+                //Find All Server Signs
+                for (int i = World.Serialization.world.prefabs.Count - 1; i >= 0; i--)
                 {
-                    foreach (BaseEntity s in FindSkin(prefabdata.position, 0.55f))
+                    PrefabData prefabdata = World.Serialization.world.prefabs[i];
+                    if (isSign(prefabdata))
                     {
-                        if (!ServerSkinnables.ContainsKey(s))
-                            ServerSkinnables.Add(s, prefabdata.scale);
-                    }
-                }
-            }
-            if (showDebug) Puts("Found " + ServerSigns.Count.ToString() + " Server Signs");
-            if (showDebug) Puts("Found " + ServerSkinnables.Count.ToString() + " Server Skinnable Items");
-            //Check if there is sign data
-            if (ServerSigns.Count != 0)
-            {
-                //Apply Sign Data to Found Signs
-                foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
-                {
-                    if (showDebug) Puts("Found Sign @ " + ss.Key.transform.position);
-                    foreach (KeyValuePair<Vector3, byte[]> sd in SignData)
-                    {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        foreach (Signage s in FindSign(prefabdata.position, 0.2f))
                         {
-                            if (showDebug) Puts("Applying Image");
-                            ApplySignage(ss.Key, sd.Value, 0);
-                            ss.Key.SetFlag(BaseEntity.Flags.Locked, true);
-                            ss.Key.SendNetworkUpdate();
+                            if (!ServerSigns.ContainsKey(s))
+                                ServerSigns.Add(s, prefabdata.scale);
+                        }
+                    }
+                    if (isSkinnable(prefabdata))
+                    {
+                        foreach (BaseEntity s in FindSkin(prefabdata.position, 0.55f))
+                        {
+                            if (!ServerSkinnables.ContainsKey(s))
+                                ServerSkinnables.Add(s, prefabdata.scale);
                         }
                     }
                 }
-            }
-            if (ServerSkinnables.Count != 0)
-            {
-                //Apply Skin Data to Found Skinnables
-                foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
+                if (showDebug) Puts("Found " + ServerSigns.Count.ToString() + " Server Signs");
+                if (showDebug) Puts("Found " + ServerSkinnables.Count.ToString() + " Server Skinnable Items");
+                //Check if there is sign data
+                if (ServerSigns.Count != 0)
                 {
-                    if (showDebug) Puts("Found skinnable @ " + ss.Key.transform.position);
-                    foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                    //Apply Sign Data to Found Signs
+                    foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
                     {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        if (showDebug) Puts("Found Sign @ " + ss.Key.transform.position);
+                        foreach (KeyValuePair<Vector3, byte[]> sd in SignData)
                         {
-                            if (showDebug) Puts("Applying skin");
-                            ApplySkin(ss.Key, sd.Value);
+                            if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                            {
+                                if (showDebug) Puts("Applying Image");
+                                ApplySignage(ss.Key, sd.Value, 0);
+                                if (!Protected.Contains(ss.Key as BaseEntity))
+                                {
+                                    Protected.Add(ss.Key as BaseEntity);
+                                }
+                                ss.Key.SetFlag(BaseEntity.Flags.Locked, true);
+                                ss.Key.SendNetworkUpdate();
+                            }
                         }
                     }
                 }
-            }
-            Rescale();
+                if (ServerSkinnables.Count != 0)
+                {
+                    //Apply Skin Data to Found Skinnables
+                    foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
+                    {
+                        if (showDebug) Puts("Found skinnable @ " + ss.Key.transform.position);
+                        foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                        {
+                            if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                            {
+                                if (showDebug) Puts("Applying skin");
+                                ApplySkin(ss.Key, sd.Value);
+                                if (!Protected.Contains(ss.Key as BaseEntity))
+                                {
+                                    Protected.Add(ss.Key as BaseEntity);
+                                }
+                            }
+                        }
+                    }
+                }
+                Rescale();
+            });
         }
 
         public bool doScale(BaseEntity be, float radius)
@@ -546,7 +571,7 @@ namespace Oxide.Plugins
         {
             string XMLData = @"<? xml version=""1.0""?><SerializedImageData>";
             string SerialData = "";
-            foreach (KeyValuePair<Signage,Vector3> _sign in ServerSigns)
+            foreach (KeyValuePair<Signage, Vector3> _sign in ServerSigns)
             {
                 for (int num = 0; num < _sign.Key.textureIDs.Length; num++)
                 {
@@ -577,7 +602,7 @@ namespace Oxide.Plugins
         {
             string XMLData = @"<? xml version=""1.0""?><SerializedSkinData>";
             string SerialData = "";
-            foreach (KeyValuePair<BaseEntity,Vector3> _skin in ServerSkinnables)
+            foreach (KeyValuePair<BaseEntity, Vector3> _skin in ServerSkinnables)
             {
 
                 if (_skin.Key.skinID != 0)
@@ -633,7 +658,7 @@ namespace Oxide.Plugins
                 Raw = raw;
                 Hor = hor;
             }
-        }       
+        }
 
         private void StartNextDownload(bool reduceCount = false)
         {
@@ -812,9 +837,24 @@ namespace Oxide.Plugins
             image.SetPixel(image.Width - 1, image.Height - 1, pixel);
         }
 
+        void DestroyGroundComp(BaseEntity ent)
+        {
+            UnityEngine.Object.DestroyImmediate(ent.GetComponent<DestroyOnGroundMissing>());
+            UnityEngine.Object.DestroyImmediate(ent.GetComponent<GroundWatch>());
+            //Stops Decay
+            UnityEngine.Object.DestroyImmediate(ent.GetComponent<DeployableDecay>());
+        }
+
+        void DestroyMeshCollider(BaseEntity ent)
+        {
+            foreach (var mesh in ent.GetComponentsInChildren<MeshCollider>())
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
         //Chat Commands
         //
-
         //Prints Image Onto Sign being looked at.
         [ChatCommand("ssign")]
         void signcommand(BasePlayer basePlayer, string command, string[] args)
@@ -921,6 +961,7 @@ namespace Oxide.Plugins
                 basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
                 return;
             }
+            //Send scale command to EntityScaleManager
             EntityScaleManager.Call("API_ScaleEntity", entity, scale);
 
             //Find in prefab list and update its scale
@@ -935,35 +976,145 @@ namespace Oxide.Plugins
         }
 
         //Resets to settings in mapdata
-        [ChatCommand("Reset")]
-        void Rescale(BasePlayer player, string command, string[] args)
+        [ChatCommand("sreset")]
+        void Reset(BasePlayer player, string command, string[] args)
         {
-            //Remove signs and entitys defined in the MapData
-            foreach(KeyValuePair<Vector3,uint> skinned in SkinData)
+            //Remove Protection
+            Protected.Clear();
+
+            //Remove all scaled entitys.
+            foreach (BaseEntity be in ScaledEntitys)
             {
                 try
                 {
-                    BaseEntity BaseEntity = FindSkin(skinned.Key, 1f)[0];
-                    BaseEntity.Kill();
-                }
-                catch { }
-            }
-            foreach (KeyValuePair<Vector3, byte[]> painted in SignData)
-            {
-                try
-                {
-                    BaseEntity BaseEntity = FindSkin(painted.Key, 0.65f)[0];
-                    BaseEntity.Kill();
+                    be.OwnerID = 123456;
+                    be.Kill();
                 }
                 catch { }
             }
 
-            //Recreate them from Prefab List
-
+            //Scan though prefab list and remove skinnable items and paintable signs placed in rustedit.
+            foreach (PrefabData pd in World.Serialization.world.prefabs)
+            {
+                if (signids.Contains(pd.id))
+                {
+                    BaseEntity[] BaseEntity = FindSign(pd.position, 0.65f).ToArray();
+                    foreach (BaseEntity be in BaseEntity)
+                    {
+                        if (be != null)
+                        {
+                            be.OwnerID = 123456;
+                            be.Kill();
+                        }
+                    }
+                }
+                if (skinnableids.Contains(pd.id))
+                {
+                    BaseEntity[] BaseEntity = FindSkin(pd.position, 0.65f).ToArray();
+                    foreach (BaseEntity be in BaseEntity)
+                    {
+                        if (be != null)
+                        {
+                            be.OwnerID = 123456;
+                            be.Kill();
+                        }
+                    }
+                }
+            }
+            player.ChatMessage("Removed server skinnables and signs.");
+            //Delay to allow everything to be destroyed.
+            timer.Once(5f, () =>
+            {
+                player.ChatMessage("Respawning server skinnables and signs.");
+                //Recreate them from Prefab List
+                foreach (PrefabData pd in World.Serialization.world.prefabs)
+                {
+                    if (signids.Contains(pd.id))
+                    {
+                        Signage replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as Signage;
+                        if (replacement == null) return;
+                        DestroyGroundComp(replacement);
+                        Protected.Add(replacement);
+                        replacement.Spawn();
+                        replacement.transform.position = pd.position;
+                        replacement.transform.rotation = pd.rotation;
+                        replacement.pickup.enabled = false;
+                    }
+                    if (skinnableids.Contains(pd.id))
+                    {
+                        string isdoor = StringPool.Get(pd.id);
+                        if (isdoor.Contains("hinged"))
+                        {
+                            Door replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as Door;
+                            if (replacement == null) return;
+                            DestroyMeshCollider(replacement);
+                            DestroyGroundComp(replacement);
+                            Protected.Add(replacement);
+                            replacement.Spawn();
+                            replacement.transform.position = pd.position;
+                            replacement.transform.rotation = pd.rotation;
+                            replacement.grounded = true;
+                            replacement.pickup.enabled = false;
+                        }
+                        else
+                        {
+                            BaseEntity replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as BaseEntity;
+                            if (replacement == null) return;
+                            DestroyGroundComp(replacement);
+                            Protected.Add(replacement);
+                            replacement.Spawn();
+                            replacement.transform.position = pd.position;
+                            replacement.transform.rotation = pd.rotation;
+                        }
+                    }
+                }
+                //Send update for each.
+                foreach (BaseEntity be in Protected)
+                {
+                    be.SendNetworkUpdateImmediate(true);
+                }
+                //Clear Data ready for resetup
+                ScaledEntitys.Clear();
+                ServerSigns.Clear();
+                ServerSkinnables.Clear();
+                SignData.Clear();
+                SkinData.Clear();
+                //Resetup
+                Startup();
+                player.ChatMessage("Completed");
+            });
         }
 
-            //Save Map and Data to MapData
-            [ChatCommand("MapSave")]
+        //Chat Command to remove skinnable and paintable entitys since they are given protection.
+        [ChatCommand("sremove")]
+        void removeentity(BasePlayer player, string command, string[] args)
+        {
+            RaycastHit hit;
+            if (!Physics.Raycast(player.eyes.HeadRay(), out hit))
+            {
+                player.ChatMessage("No Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+
+            var entity = hit.GetEntity();
+            if (entity == null)
+            {
+                player.ChatMessage("No Entitys Found. Try Looking at the Hinge area if its a door.");
+                return;
+            }
+            if (Protected.Contains(entity))
+            {
+                Protected.Remove(entity);
+                entity.OwnerID = 123456;
+                entity.Kill();
+                player.ChatMessage("Entity protection disabled and removed.");
+                return;
+            }
+            player.ChatMessage("Not a protected entity use normal admin kill on it.");
+        }
+
+        //Save Map and Data to MapData
+        [ChatCommand("MapSave")]
         void MapSave(BasePlayer player, string command, string[] args)
         {
             if (!permission.UserHasPermission(player.UserIDString, PermMap))
