@@ -7,5 +7,5 @@
 <li>Scaling is handled by Entity Scale Manager.</li>
 <li>If your server crashes or doesnt shut down properly then the unload hook will be missed and scaled objects will be invisable on next startup. You can use the /sreset command to reset them. Then save and restart the server cleanly to return to normal functions.</li>
 </ul>
-<p><strong>Video:</strong><br /><a href="https://www.youtube.com/watch?v=b51NSHX6GLk" target="_blank" rel="noopener">https://www.youtube.com/watch?v=b51NSHX6GLk</a></p>
+<p><strong>Video:</strong><br /><a href="https://www.youtube.com/watch?v=vG-op5h5AN4" target="_blank" rel="noopener">https://www.youtube.com/watch?v=vG-op5h5AN4</a></p>
 <p><img src="https://github.com/bmgjet/SignToolsGUI/raw/master/se.jpg" /></p>
