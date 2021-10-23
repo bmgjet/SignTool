@@ -17,7 +17,7 @@ using Oxide.Core.Plugins;
 
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.5")]
+    [Info("SignTool", "bmgjet", "1.0.6")]
     [Description("SignTool, Insert Images, Skins,Scale into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
@@ -27,7 +27,7 @@ namespace Oxide.Plugins
     //            <y>0</y>
     //            <z>0</z>
     //        </position>
-    //        <texture>Base64 Image Bytes</texture>
+    //        <texture>Base64 Image Bytes<frame>X<frame>.....</texture>
     //</SerializedImageData>
 
     //XML Data LayOut for Image Data
@@ -51,12 +51,18 @@ namespace Oxide.Plugins
         Dictionary<Signage, Vector3> ServerSigns = new Dictionary<Signage, Vector3>();
         //List Of Server Skinnable prefabs Found
         Dictionary<BaseEntity, Vector3> ServerSkinnables = new Dictionary<BaseEntity, Vector3>();
+        //List of server RE Scaleable Prefabs
+        Dictionary<BaseEntity, Vector3> ServerScalable = new Dictionary<BaseEntity, Vector3>();
         //IDs of types of signs
-        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
+        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242};
         //IDs of prefabs that are skinnable
-        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296 };
-
+        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153 };
+        //Deployables in RE to check scale of
+        uint[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013 };
+        //Neon sign Ids
+        uint[] Neons = { 708840119, 3591916872, 3919686896, 2628005754, 3168507223 };
         /*
+         
         //Paintable Signs
         sign.small.wood.prefab
         sign.post.town.roof.prefab
@@ -76,6 +82,13 @@ namespace Oxide.Plugins
         sign.large.wood.prefab
         sign.huge.wood.prefab
         sign.hanging.prefab
+
+        //Neon Patched
+        sign.neon.xl.prefab
+        sign.neon.xl.animated.prefab
+        sign.neon.125x215.animated.prefab
+        sign.neon.125x215.prefab
+        sign.neon.125x125.prefab
 
         //Skinnable Items
         fridge.deployed.prefab
@@ -99,12 +112,18 @@ namespace Oxide.Plugins
         barricade.concrete.prefab
         barricade.sandbags.prefab
         waterpurifier.deployed.prefab
+
+        //ScaleableRE
+        sliding_blast_door.prefab
+        door.hinged.security.blue.prefab
+        door.hinged.security.green.prefab
+        door.hinged.security.red.prefab
         */
 
         //Admin Permission
         const string PermMap = "SignTool.admin";
         //Sign Data Extracted from MapData
-        Dictionary<Vector3, byte[]> SignData = new Dictionary<Vector3, byte[]>();
+        Dictionary<Vector3, List<byte[]>> SignData = new Dictionary<Vector3, List<byte[]>>();
         //Skin Data Extracted from MapData
         Dictionary<Vector3, uint> SkinData = new Dictionary<Vector3, uint>();
         //Sign Sizes (Thanks to SignArtists code)
@@ -134,6 +153,7 @@ namespace Oxide.Plugins
             {"sign.neon.125x215", new SignSize(215, 125)},
             {"sign.neon.125x125", new SignSize(125, 125)},
         };
+        public String Blanked = "iVBORw0KGgoAAAANSUhEUgAAANcAAAB9CAYAAAAx+vY9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAB/SURBVHhe7cGBAAAAAMOg+VNf4QBVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8aqR4AAFsKyZjAAAAAElFTkSuQmCC";
 
         private readonly Queue<DownloadRequest> downloadQueue = new Queue<DownloadRequest>();
 
@@ -245,10 +265,24 @@ namespace Oxide.Plugins
             permission.RegisterPermission(PermMap, this);
         }
 
+        private void OnWorldPrefabSpawned(GameObject gameObject, string str)
+        {
+            //Fix Neons Loading by removing them and storing while server loads.
+            BaseEntity component = gameObject.GetComponent<BaseEntity>();
+            if (component != null)
+            {
+                if ((component.prefabID == 708840119 || component.prefabID == 3591916872 || component.prefabID == 3919686896 || component.prefabID == 2628005754 || component.prefabID == 3168507223) && component.OwnerID == 0)
+                {
+                    //Kill all the Neons that server Created.
+                    component.Kill();
+                }
+            }
+        }
+
         bool isSign(PrefabData sign)
         {
             //Checks prefab has a valid sign id
-            return (signids.Contains(sign.id));
+            return (signids.Contains(sign.id) || Neons.Contains(sign.id));
         }
 
         bool isSkinnable(PrefabData skinid)
@@ -257,17 +291,18 @@ namespace Oxide.Plugins
             return (skinnableids.Contains(skinid.id));
         }
 
+        bool isScaleable(PrefabData scale)
+        {
+            //Checks prefab has a valid skinnable id
+            return (ScaleableRE.Contains(scale.id));
+        }
+
         public string Base64Encode(string plainText)
         {
             var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
             return System.Convert.ToBase64String(plainTextBytes);
         }
 
-        public string Base64Decode(string base64EncodedData)
-        {
-            var base64EncodedBytes = System.Convert.FromBase64String(base64EncodedData);
-            return System.Text.Encoding.UTF8.GetString(base64EncodedBytes);
-        }
 
         object OnEntityKill(BaseNetworkable entity)
         {
@@ -281,6 +316,7 @@ namespace Oxide.Plugins
 
         public void Rescale()
         {
+            //Checks if plugin is installed
             if (EntityScaleManager == null)
             {
                 Puts(@"Scaling Disabled get plugin https://umod.org/plugins/entity-scale-manager");
@@ -293,7 +329,7 @@ namespace Oxide.Plugins
                 foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
                 {
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
-                    foreach (KeyValuePair<Vector3, byte[]> sd in SignData)
+                    foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
                     {
                         if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
                         {
@@ -333,11 +369,29 @@ namespace Oxide.Plugins
                     }
                 }
             }
+            if (ServerScalable.Count != 0)
+            {
+                //Apply Scale Data to Found Scaleable
+                foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerScalable)
+                {
+                    if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
+                            //Scale
+                            RemoveSphere(ss.Key);
+
+                            if (doScale(ss.Key, ss.Value.z))
+                            {
+                                ScaledEntitys.Add(ss.Key as BaseEntity);
+                                Scaled++;
+                                if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
+                            }
+                }
+            }
             Puts("Scaled " + Scaled.ToString() + " Entitys");
         }
 
         private void Unload()
         {
+            //Remove all scaling for clear start using map data.
             foreach (BaseEntity be in ScaledEntitys)
             {
                 RemoveSphere(be);
@@ -362,6 +416,13 @@ namespace Oxide.Plugins
 
         public void Startup()
         {
+            foreach (Signage Neon in UnityEngine.Object.FindObjectsOfType<Signage>())
+            {
+                if (Neons.Contains(Neon.prefabID) && Neon.OwnerID == 0)
+                {
+                    Neon.Kill();
+                }
+            }
             //Delay slightly to give time for everything to be fully loaded on slow servers.
             timer.Once(2f, () =>
             {
@@ -382,16 +443,22 @@ namespace Oxide.Plugins
                         Puts("Processed SerializedSkinData " + SkinData.Count.ToString() + " Skins Found");
                     }
                 }
-                //Find All Server Signs
+                int FixedNeons = 0;
+                FixedNeons = 0;
+                //Find All Server Signs and skinnables in the map file
                 for (int i = World.Serialization.world.prefabs.Count - 1; i >= 0; i--)
                 {
                     PrefabData prefabdata = World.Serialization.world.prefabs[i];
+                    if (Neons.Contains(prefabdata.id))
+                    {
+                        FixedNeons += CreateNeon(prefabdata);
+                    }
                     if (isSign(prefabdata))
                     {
                         foreach (Signage s in FindSign(prefabdata.position, 0.2f))
                         {
                             if (!ServerSigns.ContainsKey(s))
-                                ServerSigns.Add(s, prefabdata.scale);
+                            ServerSigns.Add(s, prefabdata.scale);
                         }
                     }
                     if (isSkinnable(prefabdata))
@@ -402,9 +469,19 @@ namespace Oxide.Plugins
                                 ServerSkinnables.Add(s, prefabdata.scale);
                         }
                     }
+                    if (isScaleable(prefabdata))
+                    {
+                        foreach (BaseEntity s in FindSkin(prefabdata.position, 0.55f))
+                        {
+                            if (!ServerScalable.ContainsKey(s))
+                            ServerScalable.Add(s, prefabdata.scale);
+                        }
+                    }
                 }
+                Puts("Fixed " + FixedNeons.ToString() + " Neon Signs");
                 if (showDebug) Puts("Found " + ServerSigns.Count.ToString() + " Server Signs");
                 if (showDebug) Puts("Found " + ServerSkinnables.Count.ToString() + " Server Skinnable Items");
+                if (showDebug) Puts("Found " + ServerScalable.Count.ToString() + " Server Scaleable Items");
                 //Check if there is sign data
                 if (ServerSigns.Count != 0)
                 {
@@ -412,12 +489,26 @@ namespace Oxide.Plugins
                     foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
                     {
                         if (showDebug) Puts("Found Sign @ " + ss.Key.transform.position);
-                        foreach (KeyValuePair<Vector3, byte[]> sd in SignData)
+                        foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
                         {
                             if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
                             {
                                 if (showDebug) Puts("Applying Image");
-                                ApplySignage(ss.Key, sd.Value, 0);
+                                if (sd.Value.Count == 1)
+                                {
+                                    ApplySignage(ss.Key, sd.Value[0], 0);
+                                }
+                                else
+                                {
+                                    for(int id = 0; id < sd.Value.Count;id++)
+                                    {
+                                        try
+                                        {
+                                            ApplySignage(ss.Key, sd.Value[id], id);
+                                        }
+                                        catch { }
+                                    }
+                                }
                                 if (!Protected.Contains(ss.Key as BaseEntity))
                                 {
                                     Protected.Add(ss.Key as BaseEntity);
@@ -449,8 +540,66 @@ namespace Oxide.Plugins
                     }
                 }
                 Rescale();
+                foreach(BaseEntity meshdestroy in Protected)
+                {
+                    DestroyMeshCollider(meshdestroy);
+                }
             });
         }
+
+        public int CreateNeon(PrefabData pd)
+        {
+            //Create New Neon
+            try
+            {
+                if(FindSign(pd.position,0.2f).Count < 0)
+                {
+                    Puts("Already A Neon There");
+                    return 0;
+                }
+
+
+                NeonSign replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as NeonSign;
+                if (replacement == null) return 0;
+                DestroyGroundComp(replacement);
+                DestroyMeshCollider(replacement);
+                Protected.Add(replacement);
+                replacement.Spawn();
+                replacement.currentFrame = 0;
+                replacement.animationSpeed = 1f;
+                replacement.transform.position = pd.position;
+                replacement.transform.rotation = pd.rotation;
+                replacement.pickup.enabled = false;
+                byte[] Blank = Convert.FromBase64String(Blanked);
+                if (replacement.prefabID == 708840119)
+                {
+                    ApplySignage(replacement, Blank, 0);
+                    ApplySignage(replacement, Blank, 1);
+                    ApplySignage(replacement, Blank, 2);
+                    ApplySignage(replacement, Blank, 3);
+                    ApplySignage(replacement, Blank, 4);
+                }
+                else if (replacement.prefabID == 3591916872)
+                {
+                    ApplySignage(replacement, Blank, 0);
+                    ApplySignage(replacement, Blank, 1);
+                    ApplySignage(replacement, Blank, 2);
+                }
+                else
+                {
+                    ApplySignage(replacement, Blank, 0);
+                }
+
+                //Give full power
+                replacement.UpdateHasPower(100, 1);
+                replacement.SendNetworkUpdateImmediate(true);
+                return 1;
+            }
+            catch { }
+            return 0;
+        }
+
+
 
         public bool doScale(BaseEntity be, float radius)
         {
@@ -545,9 +694,29 @@ namespace Oxide.Plugins
                 string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
                 string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
                 string texture = xmldata.Split(new string[] { "<texture>" }, StringSplitOptions.None)[1].Replace("</texture>", "").Replace("</SerializedImageData>", "");
-                byte[] ImageData = Convert.FromBase64String(texture);
+                string[] imageFrames = texture.Split(new string[] { "<frame>" }, StringSplitOptions.None);
+                List<byte[]> ImageData = new List<byte[]>();
+                foreach (string imageframe in imageFrames)
+                {
+                    if (imageframe != "")
+                    {
+                        ImageData.Add(Convert.FromBase64String(imageframe.Replace("<frame>", "")));
+                    }
+                    else
+                    {
+                        ImageData.Add(Convert.FromBase64String(Blanked));
+                    }
+
+                }
                 Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
-                SignData.Add(pos, ImageData);
+                if (!SignData.ContainsKey(pos))
+                {
+                    try
+                    {
+                        SignData.Add(pos, ImageData);
+                    }
+                    catch { }
+                }
             }
         }
 
@@ -573,26 +742,37 @@ namespace Oxide.Plugins
             string SerialData = "";
             foreach (KeyValuePair<Signage, Vector3> _sign in ServerSigns)
             {
-                for (int num = 0; num < _sign.Key.textureIDs.Length; num++)
-                {
-                    var textureId = _sign.Key.textureIDs[num];
-                    if (textureId == 0)
-                        continue;
-
-                    var imageByte = FileStorage.server.Get(textureId, FileStorage.Type.png, _sign.Key.net.ID);
-                    if (imageByte != null)
-                    {
-                        SerialData += ("<position>" +
+            SerialData += ("<position>" +
                                "<x>" + _sign.Key.transform.position.x.ToString("0.0") + "</x>" +
                                "<y>" + _sign.Key.transform.position.y.ToString("0.0") + "</y>" +
                                "<z>" + _sign.Key.transform.position.z.ToString("0.0") + "</z>" +
                                "</position>" +
-                               "<texture>" +
-                               Convert.ToBase64String(imageByte) +
-                               "</texture>");
-                        continue;
+                               "<texture>");
+                List<byte[]> Images = new List<byte[]>();
+                for(int ids = 0; ids < _sign.Key.textureIDs.Length; ids++)
+                {
+                    try
+                    {
+                        byte[] image = FileStorage.server.Get(_sign.Key.textureIDs[ids], FileStorage.Type.png, _sign.Key.net.ID);
+                        Images.Add(image);
+                    }
+                    catch
+                    {
+                        Images.Add(Convert.FromBase64String(Blanked));
                     }
                 }
+                foreach(byte[] imagedata in Images)
+                {
+                    try
+                    {
+                        SerialData +=  Convert.ToBase64String(imagedata) + "<frame>";
+                    }
+                    catch
+                    {
+                        SerialData += Blanked + "<frame>";
+                    }
+                }
+                SerialData += "</texture>";
             }
             XMLData = XMLData + SerialData + "</SerializedImageData>";
             return XMLData;
@@ -662,7 +842,11 @@ namespace Oxide.Plugins
 
         private void StartNextDownload(bool reduceCount = false)
         {
-            ServerMgr.Instance.StartCoroutine(DownloadImage(downloadQueue.Dequeue()));
+            try
+            {
+                ServerMgr.Instance.StartCoroutine(DownloadImage(downloadQueue.Dequeue()));
+            }
+            catch { }
         }
         private SignSize GetImageSizeFor(IPaintableEntity signage)
         {
@@ -674,6 +858,33 @@ namespace Oxide.Plugins
         }
         private IEnumerator DownloadImage(DownloadRequest request)
         {
+            int fselected = 0;
+            if (request.Url.StartsWith("frame:0"))
+            {
+                fselected = 0;
+                request.Url = request.Url.Replace("frame:0", "");
+            }
+            else if (request.Url.StartsWith("frame:1"))
+            {
+                fselected = 1;
+                request.Url = request.Url.Replace("frame:1", "");
+            }
+            else if (request.Url.StartsWith("frame:2"))
+            {
+                fselected = 2;
+                request.Url = request.Url.Replace("frame:2", "");
+            }
+            else if (request.Url.StartsWith("frame:3"))
+            {
+                fselected = 3;
+                request.Url = request.Url.Replace("frame:3", "");
+            }
+            else if (request.Url.StartsWith("frame:4"))
+            {
+                fselected = 4;
+                request.Url = request.Url.Replace("frame:4", "");
+            }
+            
             byte[] imageBytes;
             //Path for Base64 weblinks
             if (request.Url.StartsWith("data:image"))
@@ -731,7 +942,7 @@ namespace Oxide.Plugins
             }
 
             // Create the image on the filestorage and send out a network update for the sign.
-            request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, request.Sign.NetId), 0);
+            request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, request.Sign.NetId), fselected);
             request.Sign.SendNetworkUpdate();
 
             // Notify the player that the image was loaded.
@@ -981,7 +1192,6 @@ namespace Oxide.Plugins
         {
             //Remove Protection
             Protected.Clear();
-
             //Remove all scaled entitys.
             foreach (BaseEntity be in ScaledEntitys)
             {
@@ -1079,6 +1289,7 @@ namespace Oxide.Plugins
                 ServerSkinnables.Clear();
                 SignData.Clear();
                 SkinData.Clear();
+                ServerScalable.Clear();
                 //Resetup
                 Startup();
                 player.ChatMessage("Completed");
