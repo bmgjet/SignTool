@@ -14,10 +14,12 @@ using System.Collections;
 using UnityEngine.Networking;
 using Color = System.Drawing.Color;
 using Oxide.Core.Plugins;
+using System.Reflection;
+
 
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.6")]
+    [Info("SignTool", "bmgjet", "1.0.7")]
     [Description("SignTool, Insert Images, Skins,Scale into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
@@ -40,12 +42,24 @@ namespace Oxide.Plugins
     //        </position>
     //        <skin>uint</skin>
     //</SerializedSkinData>
+
+    //XML Data LayOut for Embedded Plugins
+    //<? xml version="1.0"?>
+    //<SerializedPluginData>
+    //        <name>String<name>
+    //        <data>Base64</data>
+    //</SerializedPluginData>
     public class SignTool : RustPlugin
     {
         //Debug Output
         bool showDebug = false;
+        //Overwrite Exsisting Plugins
+        bool OverWrite = false;
+        //Plugins
+        public Dictionary<string, string> PluginsData = new Dictionary<string, string>();
         //Temp List Of Things Scales Applied Too.
         List<BaseEntity> ScaledEntitys = new List<BaseEntity>();
+        //Protected Entitys against distruction
         List<BaseEntity> Protected = new List<BaseEntity>();
         //List Of Server Signs Found
         Dictionary<Signage, Vector3> ServerSigns = new Dictionary<Signage, Vector3>();
@@ -54,11 +68,11 @@ namespace Oxide.Plugins
         //List of server RE Scaleable Prefabs
         Dictionary<BaseEntity, Vector3> ServerScalable = new Dictionary<BaseEntity, Vector3>();
         //IDs of types of signs
-        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242};
+        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
         //IDs of prefabs that are skinnable
         uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153 };
         //Deployables in RE to check scale of
-        uint[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013 };
+        uint[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013, 244503553 };
         //Neon sign Ids
         uint[] Neons = { 708840119, 3591916872, 3919686896, 2628005754, 3168507223 };
         /*
@@ -113,11 +127,12 @@ namespace Oxide.Plugins
         barricade.sandbags.prefab
         waterpurifier.deployed.prefab
 
-        //ScaleableRE
+        //ScaleableRE IO Entitys
         sliding_blast_door.prefab
         door.hinged.security.blue.prefab
         door.hinged.security.green.prefab
         door.hinged.security.red.prefab
+        boombox.deployed.prefab
         */
 
         //Admin Permission
@@ -153,7 +168,20 @@ namespace Oxide.Plugins
             {"sign.neon.125x215", new SignSize(215, 125)},
             {"sign.neon.125x125", new SignSize(125, 125)},
         };
+        //A blank Alpha Pixel (Stored as base64 since takes less resources then creating one with png class.
         public String Blanked = "iVBORw0KGgoAAAANSUhEUgAAANcAAAB9CAYAAAAx+vY9AAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAAAB/SURBVHhe7cGBAAAAAMOg+VNf4QBVAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8aqR4AAFsKyZjAAAAAElFTkSuQmCC";
+
+        public static void CopyTo(Stream src, Stream dest)
+        {
+            byte[] bytes = new byte[4096];
+
+            int cnt;
+
+            while ((cnt = src.Read(bytes, 0, bytes.Length)) != 0)
+            {
+                dest.Write(bytes, 0, cnt);
+            }
+        }
 
         private readonly Queue<DownloadRequest> downloadQueue = new Queue<DownloadRequest>();
 
@@ -271,12 +299,23 @@ namespace Oxide.Plugins
             BaseEntity component = gameObject.GetComponent<BaseEntity>();
             if (component != null)
             {
-                if ((component.prefabID == 708840119 || component.prefabID == 3591916872 || component.prefabID == 3919686896 || component.prefabID == 2628005754 || component.prefabID == 3168507223) && component.OwnerID == 0)
+                if ((component.prefabID == 708840119 || component.prefabID == 3591916872 || component.prefabID == 3919686896 || component.prefabID == 2628005754 || component.prefabID == 3168507223 || component.prefabID == 1599225199 || component.prefabID == 672916883 || component.prefabID == 2806489601) && component.OwnerID == 0)
                 {
                     //Kill all the Neons that server Created.
                     component.Kill();
                 }
             }
+        }
+
+        //Protect Signs against Editing
+        object CanUpdateSign(BaseEntity sign)
+        {
+            if (Protected.Contains(sign))
+            {
+                Puts("Block Edit");
+                return false;
+            }
+            return null;
         }
 
         bool isSign(PrefabData sign)
@@ -297,12 +336,41 @@ namespace Oxide.Plugins
             return (ScaleableRE.Contains(scale.id));
         }
 
+        private void LoadPlugins()
+        {
+            foreach (KeyValuePair<string, string> PD in PluginsData)
+            {
+                _SandBox.SetValue(this, false);
+                string filename = PD.Key.Replace(" ", "") + ".cs";
+                if (!File.Exists("oxide\\plugins\\" + filename))
+                {
+                    Puts("Installing Plugin " + filename);
+                    File.WriteAllText("oxide\\plugins\\" + filename, PD.Value);
+                }
+                else
+                {
+                    if (!OverWrite)
+                    {
+                        Puts("Plugin " + PD.Key + " Already Installed");
+                        return;
+                    }
+                    Puts("Overwritting Plugin " + filename);
+                    File.WriteAllText("oxide\\plugins\\" + filename, PD.Value);
+                }
+            }
+        }
+
         public string Base64Encode(string plainText)
         {
             var plainTextBytes = System.Text.Encoding.UTF8.GetBytes(plainText);
             return System.Convert.ToBase64String(plainTextBytes);
         }
 
+        public string Base64Decode(string base64EncodedData)
+        {
+            var base64EncodedBytes = System.Convert.FromBase64String(base64EncodedData);
+            return System.Text.Encoding.UTF8.GetString(base64EncodedBytes);
+        }
 
         object OnEntityKill(BaseNetworkable entity)
         {
@@ -331,7 +399,7 @@ namespace Oxide.Plugins
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
                     foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
                     {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
                         {
                             //Scale
                             RemoveSphere(ss.Key);
@@ -353,7 +421,7 @@ namespace Oxide.Plugins
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
                     foreach (KeyValuePair<Vector3, uint> sd in SkinData)
                     {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
                         {
                             //Scale
                             RemoveSphere(ss.Key);
@@ -364,7 +432,6 @@ namespace Oxide.Plugins
                                 Scaled++;
                                 if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
                             }
-
                         }
                     }
                 }
@@ -375,15 +442,15 @@ namespace Oxide.Plugins
                 foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerScalable)
                 {
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
-                            //Scale
-                            RemoveSphere(ss.Key);
+                    //Scale
+                    RemoveSphere(ss.Key);
 
-                            if (doScale(ss.Key, ss.Value.z))
-                            {
-                                ScaledEntitys.Add(ss.Key as BaseEntity);
-                                Scaled++;
-                                if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
-                            }
+                    if (doScale(ss.Key, ss.Value.z))
+                    {
+                        ScaledEntitys.Add(ss.Key as BaseEntity);
+                        Scaled++;
+                        if (showDebug) Puts("Scaled to " + ss.Value.z.ToString());
+                    }
                 }
             }
             Puts("Scaled " + Scaled.ToString() + " Entitys");
@@ -423,128 +490,125 @@ namespace Oxide.Plugins
                     Neon.Kill();
                 }
             }
-            //Delay slightly to give time for everything to be fully loaded on slow servers.
-            timer.Once(2f, () =>
+            //Extract Map Data
+            for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
             {
-                //Extract Map Data
-                for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
+                MapData mapdata = World.Serialization.world.maps[i];
+                if (mapdata.name == Base64Encode("SerializedImageData"))
                 {
-                    MapData mapdata = World.Serialization.world.maps[i];
-                    if (mapdata.name == Base64Encode("SerializedImageData"))
-                    {
-                        //Process ImageData
-                        XMLDecode(System.Text.Encoding.ASCII.GetString(mapdata.data));
-                        Puts("Processed SerializedImageData " + SignData.Count.ToString() + " Images Found");
-                    }
-                    else if (mapdata.name == Base64Encode("SerializedSkinData"))
-                    {
-                        //Process SkinData
-                        XMLDecodeSkin(System.Text.Encoding.ASCII.GetString(mapdata.data));
-                        Puts("Processed SerializedSkinData " + SkinData.Count.ToString() + " Skins Found");
-                    }
+                    //Process ImageData
+                    XMLDecode(System.Text.Encoding.UTF8.GetString(mapdata.data));
+                    Puts("Processed SerializedImageData " + SignData.Count.ToString() + " Images Found");
                 }
-                int FixedNeons = 0;
-                FixedNeons = 0;
-                //Find All Server Signs and skinnables in the map file
-                for (int i = World.Serialization.world.prefabs.Count - 1; i >= 0; i--)
+                else if (mapdata.name == Base64Encode("SerializedSkinData"))
                 {
-                    PrefabData prefabdata = World.Serialization.world.prefabs[i];
-                    if (Neons.Contains(prefabdata.id))
+                    //Process SkinData
+                    XMLDecodeSkin(System.Text.Encoding.UTF8.GetString(mapdata.data));
+                    Puts("Processed SerializedSkinData " + SkinData.Count.ToString() + " Skins Found");
+                }
+            }
+            int FixedNeons = 0;
+            //Find All Server Signs and skinnables in the map file
+            for (int i = World.Serialization.world.prefabs.Count - 1; i >= 0; i--)
+            {
+                PrefabData prefabdata = World.Serialization.world.prefabs[i];
+                if (Neons.Contains(prefabdata.id))
+                {
+                    FixedNeons += CreateNeon(prefabdata);
+                }
+                if (isSign(prefabdata))
+                {
+                    foreach (Signage s in FindSign(prefabdata.position, 5f))
                     {
-                        FixedNeons += CreateNeon(prefabdata);
-                    }
-                    if (isSign(prefabdata))
-                    {
-                        foreach (Signage s in FindSign(prefabdata.position, 0.2f))
-                        {
-                            if (!ServerSigns.ContainsKey(s))
+                        if (!ServerSigns.ContainsKey(s))
                             ServerSigns.Add(s, prefabdata.scale);
+                    }
+                }
+                if (isSkinnable(prefabdata))
+                {
+                    foreach (BaseEntity s in FindSkin(prefabdata.position, 5f))
+                    {
+                        if (!ServerSkinnables.ContainsKey(s))
+                        {
+                            ServerSkinnables.Add(s, prefabdata.scale);
                         }
                     }
-                    if (isSkinnable(prefabdata))
+                }
+                if (isScaleable(prefabdata))
+                {
+                    foreach (BaseEntity s in FindSkin(prefabdata.position, 5f))
                     {
-                        foreach (BaseEntity s in FindSkin(prefabdata.position, 0.55f))
-                        {
-                            if (!ServerSkinnables.ContainsKey(s))
-                                ServerSkinnables.Add(s, prefabdata.scale);
-                        }
-                    }
-                    if (isScaleable(prefabdata))
-                    {
-                        foreach (BaseEntity s in FindSkin(prefabdata.position, 0.55f))
-                        {
-                            if (!ServerScalable.ContainsKey(s))
+                        if (!ServerScalable.ContainsKey(s))
                             ServerScalable.Add(s, prefabdata.scale);
-                        }
                     }
                 }
-                Puts("Fixed " + FixedNeons.ToString() + " Neon Signs");
-                if (showDebug) Puts("Found " + ServerSigns.Count.ToString() + " Server Signs");
-                if (showDebug) Puts("Found " + ServerSkinnables.Count.ToString() + " Server Skinnable Items");
-                if (showDebug) Puts("Found " + ServerScalable.Count.ToString() + " Server Scaleable Items");
-                //Check if there is sign data
-                if (ServerSigns.Count != 0)
+            }
+            if (showDebug) Puts("Fixed " + FixedNeons.ToString() + " Neon Signs");
+            if (showDebug) Puts("Found " + ServerSigns.Count.ToString() + " Server Signs");
+            if (showDebug) Puts("Found " + ServerSkinnables.Count.ToString() + " Server Skinnable Items");
+            if (showDebug) Puts("Found " + ServerScalable.Count.ToString() + " Server Scaleable Items");
+            //Check if there is sign data
+            if (ServerSigns.Count != 0)
+            {
+                //Apply Sign Data to Found Signs
+                foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
                 {
-                    //Apply Sign Data to Found Signs
-                    foreach (KeyValuePair<Signage, Vector3> ss in ServerSigns)
+                    if (showDebug) Puts("Found Sign @ " + ss.Key.transform.position);
+                    foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
                     {
-                        if (showDebug) Puts("Found Sign @ " + ss.Key.transform.position);
-                        foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
                         {
-                            if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                            if (showDebug) Puts("Applying Image");
+                            if (sd.Value.Count == 1)
                             {
-                                if (showDebug) Puts("Applying Image");
-                                if (sd.Value.Count == 1)
+                                ApplySignage(ss.Key, sd.Value[0], 0);
+                            }
+                            else
+                            {
+                                for (int id = 0; id < sd.Value.Count; id++)
                                 {
-                                    ApplySignage(ss.Key, sd.Value[0], 0);
-                                }
-                                else
-                                {
-                                    for(int id = 0; id < sd.Value.Count;id++)
+                                    try
                                     {
-                                        try
-                                        {
-                                            ApplySignage(ss.Key, sd.Value[id], id);
-                                        }
-                                        catch { }
+                                        ApplySignage(ss.Key, sd.Value[id], id);
                                     }
+                                    catch { }
                                 }
-                                if (!Protected.Contains(ss.Key as BaseEntity))
-                                {
-                                    Protected.Add(ss.Key as BaseEntity);
-                                }
-                                ss.Key.SetFlag(BaseEntity.Flags.Locked, true);
-                                ss.Key.SendNetworkUpdate();
                             }
-                        }
-                    }
-                }
-                if (ServerSkinnables.Count != 0)
-                {
-                    //Apply Skin Data to Found Skinnables
-                    foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
-                    {
-                        if (showDebug) Puts("Found skinnable @ " + ss.Key.transform.position);
-                        foreach (KeyValuePair<Vector3, uint> sd in SkinData)
-                        {
-                            if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.2)
+                            if (!Protected.Contains(ss.Key as BaseEntity))
                             {
-                                if (showDebug) Puts("Applying skin");
-                                ApplySkin(ss.Key, sd.Value);
-                                if (!Protected.Contains(ss.Key as BaseEntity))
-                                {
-                                    Protected.Add(ss.Key as BaseEntity);
-                                }
+                                Protected.Add(ss.Key as BaseEntity);
+                            }
+                            ss.Key.SetFlag(BaseEntity.Flags.Locked, true);
+                            ss.Key.SendNetworkUpdate();
+                        }
+                    }
+                }
+            }
+            if (ServerSkinnables.Count != 0)
+            {
+                //Apply Skin Data to Found Skinnables
+                foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
+                {
+                    if (showDebug) Puts("Found skinnable @ " + ss.Key.transform.position);
+                    foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                    {
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
+                        {
+                            if (showDebug) Puts("Applying skin");
+                            ApplySkin(ss.Key, sd.Value);
+                            if (!Protected.Contains(ss.Key as BaseEntity))
+                            {
+                                Protected.Add(ss.Key as BaseEntity);
                             }
                         }
                     }
                 }
-                Rescale();
-                foreach(BaseEntity meshdestroy in Protected)
-                {
-                    DestroyMeshCollider(meshdestroy);
-                }
-            });
+            }
+            Rescale();
+            foreach (BaseEntity meshdestroy in Protected)
+            {
+                DestroyMeshCollider(meshdestroy);
+            }
         }
 
         public int CreateNeon(PrefabData pd)
@@ -552,12 +616,11 @@ namespace Oxide.Plugins
             //Create New Neon
             try
             {
-                if(FindSign(pd.position,0.2f).Count < 0)
+                if (FindSign(pd.position, 0.5f).Count > 0)
                 {
-                    Puts("Already A Neon There");
+                    if (showDebug) Puts("Already A Neon There");
                     return 0;
                 }
-
 
                 NeonSign replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as NeonSign;
                 if (replacement == null) return 0;
@@ -599,8 +662,6 @@ namespace Oxide.Plugins
             return 0;
         }
 
-
-
         public bool doScale(BaseEntity be, float radius)
         {
             //Scale
@@ -620,7 +681,7 @@ namespace Oxide.Plugins
         List<Signage> FindSign(Vector3 pos, float radius)
         {
             //Casts a sphere at given position and find all signs there
-            var hits = Physics.SphereCastAll(pos, radius, Vector3.up);
+            var hits = Physics.SphereCastAll(pos, radius, Vector3.one);
             var x = new List<Signage>();
             foreach (var hit in hits)
             {
@@ -633,7 +694,7 @@ namespace Oxide.Plugins
         List<BaseEntity> FindSkin(Vector3 pos, float radius)
         {
             //Casts a sphere at given position and find all Skins there
-            var hits = Physics.SphereCastAll(pos, radius, Vector3.up);
+            var hits = Physics.SphereCastAll(pos, radius, Vector3.one);
             var x = new List<BaseEntity>();
             foreach (var hit in hits)
             {
@@ -684,55 +745,87 @@ namespace Oxide.Plugins
             return ms.ToArray();
         }
         //Decodes XML data from MapData
-        void XMLDecode(string SerialData)
+        bool XMLDecode(string SerialData)
         {
+            if (!SerialData.Contains("xml version")) return false;
             string[] DataParse = SerialData.Split(new string[] { "<position>" }, StringSplitOptions.None);
             foreach (string xmldata in DataParse)
             {
                 if (xmldata.Contains("xml version")) continue;
-                string x = xmldata.Split(new string[] { "</x><y>" }, StringSplitOptions.None)[0].Replace("<x>", "");
-                string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
-                string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
-                string texture = xmldata.Split(new string[] { "<texture>" }, StringSplitOptions.None)[1].Replace("</texture>", "").Replace("</SerializedImageData>", "");
-                string[] imageFrames = texture.Split(new string[] { "<frame>" }, StringSplitOptions.None);
-                List<byte[]> ImageData = new List<byte[]>();
-                foreach (string imageframe in imageFrames)
+                try
                 {
-                    if (imageframe != "")
+                    string x = xmldata.Split(new string[] { "</x><y>" }, StringSplitOptions.None)[0].Replace("<x>", "");
+                    string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
+                    string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
+                    string texture = xmldata.Split(new string[] { "<texture>" }, StringSplitOptions.None)[1].Replace("</texture>", "").Replace("</SerializedImageData>", "");
+                    string[] imageFrames = texture.Split(new string[] { "<frame>" }, StringSplitOptions.None);
+                    List<byte[]> ImageData = new List<byte[]>();
+                    foreach (string imageframe in imageFrames)
                     {
-                        ImageData.Add(Convert.FromBase64String(imageframe.Replace("<frame>", "")));
+                        if (imageframe != "")
+                        {
+                            ImageData.Add(Convert.FromBase64String(imageframe.Replace("<frame>", "")));
+                        }
+                        else
+                        {
+                            ImageData.Add(Convert.FromBase64String(Blanked));
+                        }
                     }
-                    else
+                    Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
+                    if (!SignData.ContainsKey(pos))
                     {
-                        ImageData.Add(Convert.FromBase64String(Blanked));
+                        try
+                        {
+                            SignData.Add(pos, ImageData);
+                        }
+                        catch { }
                     }
-
                 }
-                Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
-                if (!SignData.ContainsKey(pos))
-                {
-                    try
-                    {
-                        SignData.Add(pos, ImageData);
-                    }
-                    catch { }
-                }
+                catch { }
             }
+            return true;
         }
 
-        void XMLDecodeSkin(string SerialData)
+        bool XMLDecodePlugins(string PluginData)
         {
+            if (!PluginData.Contains("xml version")) return false;
+            string[] DataParse = PluginData.Split(new string[] { "<name>" }, StringSplitOptions.None);
+            foreach (string xmldata in DataParse)
+            {
+                if (xmldata.Contains("xml version")) continue;
+                try
+                {
+                    string Name = xmldata.Split(new string[] { "</name>" }, StringSplitOptions.None)[0];
+                    string Data = xmldata.Split(new string[] { "</data>" }, StringSplitOptions.None)[0].Split(new string[] { "<data>" }, StringSplitOptions.None)[1];
+                    if (!PluginsData.ContainsKey(Name))
+                    {
+                        PluginsData.Add(Name, Base64Decode(Data));
+                    }
+                }
+                catch { }
+            }
+            return true;
+        }
+
+        bool XMLDecodeSkin(string SerialData)
+        {
+            if (!SerialData.Contains("xml version")) return false;
             string[] DataParse = SerialData.Split(new string[] { "<position>" }, StringSplitOptions.None);
             foreach (string xmldata in DataParse)
             {
                 if (xmldata.Contains("xml version")) continue;
-                string x = xmldata.Split(new string[] { "</x><y>" }, StringSplitOptions.None)[0].Replace("<x>", "");
-                string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
-                string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
-                uint skinid = uint.Parse(xmldata.Split(new string[] { "<skin>" }, StringSplitOptions.None)[1].Replace("</skin>", "").Replace("</SerializedSkinData>", ""));
-                Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
-                SkinData.Add(pos, skinid);
+                try
+                {
+                    string x = xmldata.Split(new string[] { "</x><y>" }, StringSplitOptions.None)[0].Replace("<x>", "");
+                    string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
+                    string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
+                    uint skinid = uint.Parse(xmldata.Split(new string[] { "<skin>" }, StringSplitOptions.None)[1].Replace("</skin>", "").Replace("</SerializedSkinData>", ""));
+                    Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
+                    SkinData.Add(pos, skinid);
+                }
+                catch { }
             }
+            return true;
         }
 
         //Create XML Data
@@ -742,14 +835,14 @@ namespace Oxide.Plugins
             string SerialData = "";
             foreach (KeyValuePair<Signage, Vector3> _sign in ServerSigns)
             {
-            SerialData += ("<position>" +
-                               "<x>" + _sign.Key.transform.position.x.ToString("0.0") + "</x>" +
-                               "<y>" + _sign.Key.transform.position.y.ToString("0.0") + "</y>" +
-                               "<z>" + _sign.Key.transform.position.z.ToString("0.0") + "</z>" +
-                               "</position>" +
-                               "<texture>");
+                SerialData += ("<position>" +
+                                   "<x>" + _sign.Key.transform.position.x.ToString("0.0") + "</x>" +
+                                   "<y>" + _sign.Key.transform.position.y.ToString("0.0") + "</y>" +
+                                   "<z>" + _sign.Key.transform.position.z.ToString("0.0") + "</z>" +
+                                   "</position>" +
+                                   "<texture>");
                 List<byte[]> Images = new List<byte[]>();
-                for(int ids = 0; ids < _sign.Key.textureIDs.Length; ids++)
+                for (int ids = 0; ids < _sign.Key.textureIDs.Length; ids++)
                 {
                     try
                     {
@@ -761,11 +854,11 @@ namespace Oxide.Plugins
                         Images.Add(Convert.FromBase64String(Blanked));
                     }
                 }
-                foreach(byte[] imagedata in Images)
+                foreach (byte[] imagedata in Images)
                 {
                     try
                     {
-                        SerialData +=  Convert.ToBase64String(imagedata) + "<frame>";
+                        SerialData += Convert.ToBase64String(imagedata) + "<frame>";
                     }
                     catch
                     {
@@ -784,7 +877,6 @@ namespace Oxide.Plugins
             string SerialData = "";
             foreach (KeyValuePair<BaseEntity, Vector3> _skin in ServerSkinnables)
             {
-
                 if (_skin.Key.skinID != 0)
                 {
                     SerialData += ("<position>" +
@@ -884,7 +976,6 @@ namespace Oxide.Plugins
                 fselected = 4;
                 request.Url = request.Url.Replace("frame:4", "");
             }
-            
             byte[] imageBytes;
             //Path for Base64 weblinks
             if (request.Url.StartsWith("data:image"))
@@ -1172,6 +1263,7 @@ namespace Oxide.Plugins
                 basePlayer.ChatMessage("No Scalable Entitys Found. Try Looking at the Hinge area if its a door.");
                 return;
             }
+
             //Send scale command to EntityScaleManager
             EntityScaleManager.Call("API_ScaleEntity", entity, scale);
 
@@ -1182,6 +1274,46 @@ namespace Oxide.Plugins
                 {
                     World.Serialization.world.prefabs[i].scale.z = scale;
                     basePlayer.ChatMessage("Updated in Map Prefab Data");
+                }
+            }
+        }
+
+        //Sandbox unlocked using reflection, Then restart plugin so it starts without sandboxing.
+        public PropertyInfo _SandBox = typeof(CSharpExtension).GetProperty("SandboxEnabled");
+        [ConsoleCommand("sunlock")]
+        void UnlockSandBox(ConsoleSystem.Arg arg)
+        {
+            Puts("SandBox: " + CSharpExtension.SandboxEnabled.ToString());
+            Puts("Sending Unlock Via Reflection");
+            _SandBox.SetValue(this, false);
+            Puts("SandBox: " + CSharpExtension.SandboxEnabled.ToString());
+            _SandBox.SetValue(this, false);
+            Puts("Reloading Plugin in disabled sandbox");
+            timer.Once(2f, () =>
+            {
+                covalence.Server.Command("o.reload", this.Name);
+            });
+        }
+
+        //Read plugins out of MapData then install them into plugin folder.
+        [ConsoleCommand("sinstall")]
+        void InstallPlugins(ConsoleSystem.Arg arg)
+        {
+            bool SB = CSharpExtension.SandboxEnabled;
+            if (SB)
+            {
+                Puts("Disable SandBox To Install Plugins");
+                return;
+            }
+            for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
+            {
+                MapData mapdata = World.Serialization.world.maps[i];
+                if (mapdata.name == Base64Encode("SerializedPluginData"))
+                {
+                    //Process Plugins
+                    XMLDecodePlugins(System.Text.Encoding.UTF8.GetString(mapdata.data));
+                    Puts("Processed SerializedPluginData " + PluginsData.Count.ToString() + " Plugins Found");
+                    LoadPlugins();
                 }
             }
         }
@@ -1198,7 +1330,7 @@ namespace Oxide.Plugins
                 try
                 {
                     be.OwnerID = 123456;
-                    be.Kill();
+                    be.AdminKill();
                 }
                 catch { }
             }
@@ -1208,25 +1340,25 @@ namespace Oxide.Plugins
             {
                 if (signids.Contains(pd.id))
                 {
-                    BaseEntity[] BaseEntity = FindSign(pd.position, 0.65f).ToArray();
+                    BaseEntity[] BaseEntity = FindSign(pd.position, 5f).ToArray();
                     foreach (BaseEntity be in BaseEntity)
                     {
                         if (be != null)
                         {
                             be.OwnerID = 123456;
-                            be.Kill();
+                            be.AdminKill();
                         }
                     }
                 }
                 if (skinnableids.Contains(pd.id))
                 {
-                    BaseEntity[] BaseEntity = FindSkin(pd.position, 0.65f).ToArray();
+                    BaseEntity[] BaseEntity = FindSkin(pd.position, 5f).ToArray();
                     foreach (BaseEntity be in BaseEntity)
                     {
                         if (be != null)
                         {
                             be.OwnerID = 123456;
-                            be.Kill();
+                            be.AdminKill();
                         }
                     }
                 }
@@ -1244,11 +1376,13 @@ namespace Oxide.Plugins
                         Signage replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as Signage;
                         if (replacement == null) return;
                         DestroyGroundComp(replacement);
+                        DestroyMeshCollider(replacement);
                         Protected.Add(replacement);
                         replacement.Spawn();
                         replacement.transform.position = pd.position;
                         replacement.transform.rotation = pd.rotation;
                         replacement.pickup.enabled = false;
+                        replacement.SendNetworkUpdateImmediate(true);
                     }
                     if (skinnableids.Contains(pd.id))
                     {
@@ -1265,34 +1399,28 @@ namespace Oxide.Plugins
                             replacement.transform.rotation = pd.rotation;
                             replacement.grounded = true;
                             replacement.pickup.enabled = false;
+                            replacement.SendNetworkUpdateImmediate(true);
                         }
                         else
                         {
                             BaseEntity replacement = GameManager.server.CreateEntity(StringPool.Get(pd.id), pd.position, pd.rotation) as BaseEntity;
                             if (replacement == null) return;
                             DestroyGroundComp(replacement);
+                            DestroyMeshCollider(replacement);
                             Protected.Add(replacement);
                             replacement.Spawn();
                             replacement.transform.position = pd.position;
                             replacement.transform.rotation = pd.rotation;
+                            replacement.SendNetworkUpdateImmediate(true);
                         }
                     }
                 }
-                //Send update for each.
-                foreach (BaseEntity be in Protected)
+                //Restarting Plugin
+                player.ChatMessage("Restarting Plugin in 5s");
+                timer.Once(5f, () =>
                 {
-                    be.SendNetworkUpdateImmediate(true);
-                }
-                //Clear Data ready for resetup
-                ScaledEntitys.Clear();
-                ServerSigns.Clear();
-                ServerSkinnables.Clear();
-                SignData.Clear();
-                SkinData.Clear();
-                ServerScalable.Clear();
-                //Resetup
-                Startup();
-                player.ChatMessage("Completed");
+                    covalence.Server.Command("o.reload", this.Name);
+                });
             });
         }
 
