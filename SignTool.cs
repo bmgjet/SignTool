@@ -52,7 +52,7 @@ namespace Oxide.Plugins
     public class SignTool : RustPlugin
     {
         //Debug Output
-        bool showDebug = false;
+        bool showDebug = true;
         //Overwrite Exsisting Plugins
         bool OverWrite = false;
         //Plugins
@@ -70,7 +70,7 @@ namespace Oxide.Plugins
         //IDs of types of signs
         uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
         //IDs of prefabs that are skinnable
-        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153 };
+        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153, 3884356627 };
         //Deployables in RE to check scale of
         uint[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013, 244503553 };
         //Neon sign Ids
@@ -399,7 +399,7 @@ namespace Oxide.Plugins
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
                     foreach (KeyValuePair<Vector3, List<byte[]>> sd in SignData)
                     {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 5)
                         {
                             //Scale
                             RemoveSphere(ss.Key);
@@ -421,7 +421,7 @@ namespace Oxide.Plugins
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
                     foreach (KeyValuePair<Vector3, uint> sd in SkinData)
                     {
-                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
+                        if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 5)
                         {
                             //Scale
                             RemoveSphere(ss.Key);
@@ -518,7 +518,7 @@ namespace Oxide.Plugins
                 }
                 if (isSign(prefabdata))
                 {
-                    foreach (Signage s in FindSign(prefabdata.position, 5f))
+                    foreach (Signage s in FindSign(prefabdata.position, 3f))
                     {
                         if (!ServerSigns.ContainsKey(s))
                             ServerSigns.Add(s, prefabdata.scale);
@@ -526,20 +526,26 @@ namespace Oxide.Plugins
                 }
                 if (isSkinnable(prefabdata))
                 {
-                    foreach (BaseEntity s in FindSkin(prefabdata.position, 5f))
+                    foreach (BaseEntity s in FindSkin(prefabdata.position, 10f))
                     {
-                        if (!ServerSkinnables.ContainsKey(s))
+                        if (skinnableids.Contains(s.prefabID))
                         {
-                            ServerSkinnables.Add(s, prefabdata.scale);
+                            if (!ServerSkinnables.ContainsKey(s))
+                            {
+                                ServerSkinnables.Add(s, prefabdata.scale);
+                            }
                         }
                     }
                 }
                 if (isScaleable(prefabdata))
                 {
-                    foreach (BaseEntity s in FindSkin(prefabdata.position, 5f))
+                    foreach (BaseEntity s in FindSkin(prefabdata.position, 10f))
                     {
-                        if (!ServerScalable.ContainsKey(s))
-                            ServerScalable.Add(s, prefabdata.scale);
+                        if (ScaleableRE.Contains(s.prefabID) || skinnableids.Contains(s.prefabID))
+                        {
+                            if (!ServerScalable.ContainsKey(s))
+                                ServerScalable.Add(s, prefabdata.scale);
+                        }
                     }
                 }
             }
@@ -1340,7 +1346,7 @@ namespace Oxide.Plugins
             {
                 if (signids.Contains(pd.id))
                 {
-                    BaseEntity[] BaseEntity = FindSign(pd.position, 5f).ToArray();
+                    BaseEntity[] BaseEntity = FindSign(pd.position, 3f).ToArray();
                     foreach (BaseEntity be in BaseEntity)
                     {
                         if (be != null)
@@ -1352,7 +1358,7 @@ namespace Oxide.Plugins
                 }
                 if (skinnableids.Contains(pd.id))
                 {
-                    BaseEntity[] BaseEntity = FindSkin(pd.position, 5f).ToArray();
+                    BaseEntity[] BaseEntity = FindSkin(pd.position, 10f).ToArray();
                     foreach (BaseEntity be in BaseEntity)
                     {
                         if (be != null)
