@@ -340,7 +340,6 @@ namespace Oxide.Plugins
         {
             foreach (KeyValuePair<string, string> PD in PluginsData)
             {
-                _SandBox.SetValue(this, false);
                 string filename = PD.Key.Replace(" ", "") + ".cs";
                 if (!File.Exists("oxide\\plugins\\" + filename))
                 {
@@ -1284,33 +1283,11 @@ namespace Oxide.Plugins
             }
         }
 
-        //Sandbox unlocked using reflection, Then restart plugin so it starts without sandboxing.
-        public PropertyInfo _SandBox = typeof(CSharpExtension).GetProperty("SandboxEnabled");
-        [ConsoleCommand("sunlock")]
-        void UnlockSandBox(ConsoleSystem.Arg arg)
-        {
-            Puts("SandBox: " + CSharpExtension.SandboxEnabled.ToString());
-            Puts("Sending Unlock Via Reflection");
-            _SandBox.SetValue(this, false);
-            Puts("SandBox: " + CSharpExtension.SandboxEnabled.ToString());
-            _SandBox.SetValue(this, false);
-            Puts("Reloading Plugin in disabled sandbox");
-            timer.Once(2f, () =>
-            {
-                covalence.Server.Command("o.reload", this.Name);
-            });
-        }
 
         //Read plugins out of MapData then install them into plugin folder.
         [ConsoleCommand("sinstall")]
         void InstallPlugins(ConsoleSystem.Arg arg)
         {
-            bool SB = CSharpExtension.SandboxEnabled;
-            if (SB)
-            {
-                Puts("Disable SandBox To Install Plugins");
-                return;
-            }
             for (int i = World.Serialization.world.maps.Count - 1; i >= 0; i--)
             {
                 MapData mapdata = World.Serialization.world.maps[i];
