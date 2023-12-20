@@ -19,7 +19,7 @@ using System.Reflection;
 
 namespace Oxide.Plugins
 {
-    [Info("SignTool", "bmgjet", "1.0.7")]
+    [Info("SignTool", "bmgjet/sharingan", "1.0.8")]
     [Description("SignTool, Insert Images, Skins,Scale into map file directly, Then reload them on server startup.")]
     //XML Data LayOut for Image Data
     //<? xml version="1.0"?>
@@ -68,13 +68,13 @@ namespace Oxide.Plugins
         //List of server RE Scaleable Prefabs
         Dictionary<BaseEntity, Vector3> ServerScalable = new Dictionary<BaseEntity, Vector3>();
         //IDs of types of signs
-        uint[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
+        ulong[] signids = { 1447270506, 4057957010, 120534793, 58270319, 4290170446, 3188315846, 3215377795, 1960724311, 3159642196, 3725754530, 1957158128, 637495597, 1283107100, 4006597758, 3715545584, 3479792512, 3618197174, 550204242 };
         //IDs of prefabs that are skinnable
-        uint[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153, 3884356627 };
+        ulong[] skinnableids = { 1844023509, 177343599, 3994459244, 4196580066, 3110378351, 2206646561, 2931042549, 159326486, 2245774897, 1560881570, 3647679950, 170207918, 202293038, 1343928398, 43442943, 201071098, 1418678061, 2662124780, 2057881102, 2335812770, 2905007296, 34236153, 3884356627 };
         //Deployables in RE to check scale of
-        uint[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013, 244503553 };
+        ulong[] ScaleableRE = { 34236153, 184980835, 4094102585, 4111973013, 244503553 };
         //Neon sign Ids
-        uint[] Neons = { 708840119, 3591916872, 3919686896, 2628005754, 3168507223 };
+        ulong[] Neons = { 708840119, 3591916872, 3919686896, 2628005754, 3168507223 };
         /*
          
         //Paintable Signs
@@ -140,7 +140,7 @@ namespace Oxide.Plugins
         //Sign Data Extracted from MapData
         Dictionary<Vector3, List<byte[]>> SignData = new Dictionary<Vector3, List<byte[]>>();
         //Skin Data Extracted from MapData
-        Dictionary<Vector3, uint> SkinData = new Dictionary<Vector3, uint>();
+        Dictionary<Vector3, ulong> SkinData = new Dictionary<Vector3, ulong>();
         //Sign Sizes (Thanks to SignArtists code)
         private Dictionary<string, SignSize> _signSizes = new Dictionary<string, SignSize>
         {
@@ -190,15 +190,15 @@ namespace Oxide.Plugins
             BaseEntity Entity { get; }
             string PrefabName { get; }
             string ShortPrefabName { get; }
-            uint NetId { get; }
+            ulong NetId { get; }
             void SendNetworkUpdate();
         }
 
         public interface IPaintableEntity : IBasePaintableEntity
         {
-            void SetImage(uint id, int frameid);
+            void SetImage(ulong id, int frameid);
             bool CanUpdate(BasePlayer player);
-            uint TextureId();
+            ulong TextureId();
         }
 
         public class BasePaintableEntity : IBasePaintableEntity
@@ -206,14 +206,14 @@ namespace Oxide.Plugins
             public BaseEntity Entity { get; }
             public string PrefabName { get; }
             public string ShortPrefabName { get; }
-            public uint NetId { get; }
+            public ulong NetId { get; }
 
             protected BasePaintableEntity(BaseEntity entity)
             {
                 Entity = entity;
                 PrefabName = Entity.PrefabName;
                 ShortPrefabName = Entity.ShortPrefabName;
-                NetId = Entity.net.ID;
+                NetId = Entity.net.ID.Value;
             }
 
             public void SendNetworkUpdate()
@@ -230,18 +230,16 @@ namespace Oxide.Plugins
             {
                 Sign = sign;
             }
-
-            public void SetImage(uint id, int frameid)
+public void SetImage(ulong id, int frameid)
             {
-                Sign.textureIDs[frameid] = id;
+                Sign.textureIDs[frameid] =(uint) id;
             }
-
             public bool CanUpdate(BasePlayer player)
             {
                 return Sign.CanUpdateSign(player);
             }
 
-            public uint TextureId()
+            public ulong TextureId()
             {
                 return Sign.textureIDs.First();
             }
@@ -255,18 +253,16 @@ namespace Oxide.Plugins
             {
                 Sign = sign;
             }
-
-            public void SetImage(uint id, int frameid)
+public void SetImage(ulong id, int frameid)
             {
-                Sign._overlayTextureCrc = id;
+                Sign._overlayTextureCrc =(uint) id;
             }
-
             public bool CanUpdate(BasePlayer player)
             {
                 return Sign.CanUpdateSign(player);
             }
 
-            public uint TextureId()
+            public ulong TextureId()
             {
                 return Sign._overlayTextureCrc;
             }
@@ -418,7 +414,7 @@ namespace Oxide.Plugins
                 foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
                 {
                     if (showDebug) Puts("Found Scaled Prefab @ " + ss.Key.transform.position + " : " + ss.Value.z.ToString());
-                    foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                    foreach (KeyValuePair<Vector3, ulong> sd in SkinData)
                     {
                         if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 5)
                         {
@@ -595,7 +591,7 @@ namespace Oxide.Plugins
                 foreach (KeyValuePair<BaseEntity, Vector3> ss in ServerSkinnables)
                 {
                     if (showDebug) Puts("Found skinnable @ " + ss.Key.transform.position);
-                    foreach (KeyValuePair<Vector3, uint> sd in SkinData)
+                    foreach (KeyValuePair<Vector3, ulong> sd in SkinData)
                     {
                         if (Vector3.Distance(sd.Key, ss.Key.transform.position) < 0.6)
                         {
@@ -727,7 +723,7 @@ namespace Oxide.Plugins
             sign.textureIDs[index] = FileStorage.server.Store(resizedImage, FileStorage.Type.png, sign.net.ID);
         }
 
-        void ApplySkin(BaseEntity item, uint SkinID)
+        void ApplySkin(BaseEntity item, ulong SkinID)
         {
             //Apply Skin to item
             item.skinID = SkinID;
@@ -824,7 +820,7 @@ namespace Oxide.Plugins
                     string x = xmldata.Split(new string[] { "</x><y>" }, StringSplitOptions.None)[0].Replace("<x>", "");
                     string y = xmldata.Split(new string[] { "</y><z>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>", "");
                     string z = xmldata.Split(new string[] { "</z></position>" }, StringSplitOptions.None)[0].Replace("<x>" + x + "</x><y>" + y + "</y><z>", "");
-                    uint skinid = uint.Parse(xmldata.Split(new string[] { "<skin>" }, StringSplitOptions.None)[1].Replace("</skin>", "").Replace("</SerializedSkinData>", ""));
+                    ulong skinid = ulong.Parse(xmldata.Split(new string[] { "<skin>" }, StringSplitOptions.None)[1].Replace("</skin>", "").Replace("</SerializedSkinData>", ""));
                     Vector3 pos = new Vector3(float.Parse(x), float.Parse(y), float.Parse(z));
                     SkinData.Add(pos, skinid);
                 }
@@ -953,7 +949,7 @@ namespace Oxide.Plugins
             }
             return null;
         }
-        private IEnumerator DownloadImage(DownloadRequest request)
+private IEnumerator DownloadImage(DownloadRequest request)
         {
             int fselected = 0;
             if (request.Url.StartsWith("frame:0"))
@@ -1034,11 +1030,11 @@ namespace Oxide.Plugins
             if (request.Sign.TextureId() > 0)
             {
                 // A texture was already assigned, remove this file to make room for the new one.
-                FileStorage.server.Remove(request.Sign.TextureId(), FileStorage.Type.png, request.Sign.NetId);
+                FileStorage.server.Remove((uint)request.Sign.TextureId(), FileStorage.Type.png, new NetworkableId(request.Sign.NetId));
             }
 
             // Create the image on the filestorage and send out a network update for the sign.
-            request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, request.Sign.NetId), fselected);
+            request.Sign.SetImage(FileStorage.server.Store(resizedImageBytes, FileStorage.Type.png, new NetworkableId(request.Sign.NetId)), fselected);
             request.Sign.SendNetworkUpdate();
 
             // Notify the player that the image was loaded.
@@ -1049,9 +1045,7 @@ namespace Oxide.Plugins
 
             // Attempt to start the next download.
             StartNextDownload(true);
-        }
-
-        private byte[] GetImageBytes(UnityWebRequest www)
+        }private byte[] GetImageBytes(UnityWebRequest www)
         {
             Texture2D texture = new Texture2D(2, 2);
             texture.LoadImage(www.downloadHandler.data);
